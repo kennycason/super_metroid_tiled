@@ -23,9 +23,9 @@ GRID_START_Y = 90  # Moved down 10 pixels
 INVENTORY_HEIGHT = 100  # Increased for two rows
 INVENTORY_Y = 10  # Moved up
 HUD_WIDTH = 300  # Width for right-side combat info
-COMBAT_INFO_X = GRID_START_X + (GRID_SIZE * TILE_SIZE) + 10  # Right of grid with 10px spacing
+COMBAT_INFO_X = GRID_START_X + (GRID_SIZE * TILE_SIZE) + 20  # Right of grid with 10px spacing
 BOSS_HUD_WIDTH = 200  # Width for boss tracker
-BOSS_HUD_X = SCREEN_WIDTH - BOSS_HUD_WIDTH - 30  # Top right corner
+BOSS_HUD_X = SCREEN_WIDTH - BOSS_HUD_WIDTH - 10  # Top right corner
 
 # Colors
 BLACK = (0, 0, 0)
@@ -46,6 +46,7 @@ class TileType(Enum):
     EMPTY = "empty"
     ITEM = "item"
     BOSS = "boss"
+    ENEMY = "enemy"
 
 class AreaType(Enum):
     """Map areas like Super Metroid"""
@@ -155,7 +156,7 @@ class Game:
         boss_list = [
             "bomb_torizo", "spore_spawn", "kraid", "crocomire",
             "phantoon", "botwoon", "draygon", "gold_torizo",
-            "ridley", "mother_brain_1", "mother_brain_2"
+            "ridley", "mother_brain_1"
         ]
         self.boss_defeats = {boss: 0 for boss in boss_list}
         
@@ -170,110 +171,152 @@ class Game:
                 "bosses": ["samus_ship"],
                 "unique_items": [],  # No unique items in Crateria
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
+                "enemies": ["geemer", "skree"],
                 "color": CRATERIA_LIGHT_BLUE
             },
             AreaType.BRINSTAR: {
                 "bosses": ["kraid", "spore_spawn"],
                 "unique_items": ["morph", "bomb", "charge", "varia", "spazer"],
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
+                "enemies": ["geemer", "skree", "side_hopper"],
                 "color": BRINSTAR_GREEN
             },
             AreaType.NORFAIR: {
                 "bosses": ["ridley", "crocomire"],
                 "unique_items": ["hijump", "speed", "ice", "screw", "wave"],
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
+                "enemies": ["skree", "side_hopper", "ciser"],
                 "color": NORFAIR_RED
             },
             AreaType.MARIDIA: {
                 "bosses": ["draygon", "botwoon"],
                 "unique_items": ["grapple", "spring", "space", "plasma"],
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
+                "enemies": ["geemer", "ciser"],
                 "color": MARIDIA_BLUE
             },
             AreaType.TOURIAN: {
-                "bosses": ["mother_brain_1", "mother_brain_2"],
+                "bosses": ["mother_brain_1"],
                 "unique_items": ["xray", "gravity"],
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
+                "enemies": ["side_hopper", "ciser"],
                 "color": TOURIAN_YELLOW
             },
             AreaType.WRECKED_SHIP: {
                 "bosses": ["phantoon"],
                 "unique_items": [],  # No unique items in Wrecked Ship
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
+                "enemies": ["geemer", "skree"],
                 "color": WRECKED_SHIP_PURPLE
             },
             AreaType.CERES: {
                 "bosses": ["ceres_station", "bomb_torizo"],
                 "unique_items": [],
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
+                "enemies": ["skree", "side_hopper"],
                 "color": CERES_GRAY
             }
         }
         
-        # Boss health values
+        # Boss health values (increased for better balance)
         boss_health = {
-            "bomb_torizo": 500,
-            "spore_spawn": 800,
-            "kraid": 2000,
-            "crocomire": 1200,
-            "phantoon": 1500,
-            "botwoon": 1000,
-            "draygon": 1800,
-            "gold_torizo": 1600,
-            "ridley": 2500,
-            "mother_brain_1": 3000,
-            "mother_brain_2": 2000,
+            "bomb_torizo": 800,
+            "spore_spawn": 1200,
+            "kraid": 3000,
+            "crocomire": 2000,
+            "phantoon": 3500,
+            "botwoon": 2500,
+            "draygon": 4000,
+            "gold_torizo": 3000,
+            "ridley": 6000,
+            "mother_brain_1": 8000,
             "samus_ship": 0,  # Ship has no health - it's the starting point
-            "ceres_station": 600,
-            "golden_four": 4000
+            "ceres_station": 1000,
+            "golden_four": 6000
+        }
+        
+        # Enemy health values (minor enemies)
+        enemy_health = {
+            "geemer": 50,
+            "skree": 75,
+            "side_hopper": 100,
+            "ciser": 125
+        }
+        
+        # Enemy damage values (minor enemies)
+        self.enemy_damage = {
+            "geemer": 3,
+            "skree": 4,
+            "side_hopper": 5,
+            "ciser": 6
         }
         
         # Create area map (hidden from player)
         self.area_map = [[None for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
         
-        # Step 1: Place bosses first (spread apart)
-        self.boss_placements = {}
+        # Step 1: Build connected areas first using seed points
         area_types = list(areas.keys())
+        area_seeds = []
         
-        # Define boss placement positions (spread across map)
-        boss_positions = [
-            (5, 1, AreaType.CRATERIA),    # Samus Ship (starting point)
-            (2, 2, AreaType.BRINSTAR),    # Kraid
-            (7, 2, AreaType.BRINSTAR),    # Spore Spawn  
-            (2, 7, AreaType.NORFAIR),     # Ridley
-            (7, 7, AreaType.NORFAIR),     # Crocomire
-            (1, 5, AreaType.MARIDIA),     # Draygon
-            (8, 5, AreaType.MARIDIA),     # Botwoon
-            (5, 8, AreaType.TOURIAN),     # Mother Brain 1
-            (6, 8, AreaType.TOURIAN),     # Mother Brain 2
-            (4, 4, AreaType.WRECKED_SHIP), # Phantoon
-            (0, 0, AreaType.CERES),       # Ceres Station
-            (9, 0, AreaType.CERES),       # Bomb Torizo
+        # Place area seed points with good spacing
+        seed_positions = [
+            (2, 2), (7, 2), (2, 7), (7, 7), (4, 4), (0, 0), (9, 0)
         ]
         
-        # Place bosses
-        for x, y, area_type in boss_positions:
-            if 0 <= x < GRID_SIZE and 0 <= y < GRID_SIZE:
-                area_data = areas[area_type]
-                boss_id = area_data["bosses"].pop(0) if area_data["bosses"] else None
-                if boss_id:
-                    self.boss_placements[(x, y)] = (boss_id, area_type)
+        for i, (x, y) in enumerate(seed_positions):
+            if i < len(area_types):
+                area_type = area_types[i]
+                area_seeds.append((x, y, area_type))
         
-        # Step 2: Build areas around bosses using flood fill
-        for (bx, by), (boss_id, area_type) in self.boss_placements.items():
-            # Flood fill from boss position
-            self.flood_fill_area(bx, by, area_type, 15)  # 15 tiles per area
+        # Step 2: Build connected areas from seed points
+        for x, y, area_type in area_seeds:
+            # Determine area size randomly (12-25 tiles)
+            area_size = random.randint(12, 25)
+            self.flood_fill_area(x, y, area_type, area_size)
         
-        # Step 3: Fill remaining areas
+        # Step 3: Fill remaining areas with random assignment
         for y in range(GRID_SIZE):
             for x in range(GRID_SIZE):
                 if self.area_map[y][x] is None:
-                    # Assign to nearest area or random
-                    nearest_area = self.find_nearest_area(x, y)
-                    self.area_map[y][x] = nearest_area if nearest_area else AreaType.CRATERIA
+                    # Randomly assign to one of the existing areas
+                    existing_areas = []
+                    for ay in range(GRID_SIZE):
+                        for ax in range(GRID_SIZE):
+                            if self.area_map[ay][ax] is not None:
+                                existing_areas.append(self.area_map[ay][ax])
+                    
+                    if existing_areas:
+                        self.area_map[y][x] = random.choice(existing_areas)
+                    else:
+                        self.area_map[y][x] = AreaType.CRATERIA
         
-        # Step 4: Place unique items and consumables in correct areas
-        self.place_items_in_areas(areas, boss_health)
+        # Step 4: Place bosses within their appropriate areas
+        self.boss_placements = {}
+        for area_type, area_data in areas.items():
+            for boss_id in area_data["bosses"]:
+                # Find suitable position within the area
+                suitable_positions = []
+                for y in range(GRID_SIZE):
+                    for x in range(GRID_SIZE):
+                        if self.area_map[y][x] == area_type:
+                            # Check minimum distance from other bosses (except ship)
+                            too_close = False
+                            if boss_id != "samus_ship":
+                                for (bx, by), _ in self.boss_placements.items():
+                                    if abs(x - bx) + abs(y - by) < 3:
+                                        too_close = True
+                                        break
+                            
+                            if not too_close:
+                                suitable_positions.append((x, y))
+                
+                # Place boss if suitable position found
+                if suitable_positions:
+                    x, y = random.choice(suitable_positions)
+                    self.boss_placements[(x, y)] = (boss_id, area_type)
+        
+        # Step 5: Place unique items, consumables, and enemies in correct areas
+        self.place_items_in_areas(areas, boss_health, enemy_health)
         
     def flood_fill_area(self, start_x: int, start_y: int, area_type: AreaType, max_tiles: int):
         """Flood fill to create connected area around a boss"""
@@ -309,8 +352,8 @@ class Game:
                         
         return nearest
         
-    def place_items_in_areas(self, areas: dict, boss_health: dict):
-        """Place items and bosses in their correct areas"""
+    def place_items_in_areas(self, areas: dict, boss_health: dict, enemy_health: dict):
+        """Place items, bosses, and enemies in their correct areas"""
         # First place bosses
         for (x, y), (boss_id, area_type) in self.boss_placements.items():
             if boss_id == "samus_ship":
@@ -344,7 +387,7 @@ class Game:
                     tile = Tile(x, y, TileType.ITEM, item_id, area_type)
                     self.grid[y][x] = tile
                     
-        # Fill remaining tiles with consumables or empty
+        # Fill remaining tiles with consumables, enemies, or empty
         for y in range(GRID_SIZE):
             for x in range(GRID_SIZE):
                 if self.grid[y][x] is None:
@@ -352,10 +395,15 @@ class Game:
                     area_data = areas[area_type]
                     
                     rand = random.random()
-                    if rand < 0.3:  # 30% chance for consumable
+                    if rand < 0.2:  # 20% chance for consumable
                         item_id = random.choice(area_data["consumables"])
                         tile = Tile(x, y, TileType.ITEM, item_id, area_type)
-                    else:  # 70% empty
+                    elif rand < 0.35:  # 15% chance for enemy
+                        enemy_id = random.choice(area_data["enemies"])
+                        tile = Tile(x, y, TileType.ENEMY, enemy_id, area_type)
+                        tile.health = enemy_health[enemy_id]
+                        tile.max_health = enemy_health[enemy_id]
+                    else:  # 65% empty
                         tile = Tile(x, y, TileType.EMPTY, "", area_type)
                     
                     self.grid[y][x] = tile
@@ -374,7 +422,7 @@ class Game:
                     self.handle_click(event.pos)
                     
     def reset_game(self):
-        """Reset the game to initial state"""
+        """Reset the game to initial state - complete new game"""
         # Reset game state
         self.game_over = False
         self.victory = False
@@ -391,7 +439,7 @@ class Game:
         boss_list = [
             "bomb_torizo", "spore_spawn", "kraid", "crocomire",
             "phantoon", "botwoon", "draygon", "gold_torizo",
-            "ridley", "mother_brain_1", "mother_brain_2"
+            "ridley", "mother_brain_1"
         ]
         self.boss_defeats = {boss: 0 for boss in boss_list}
         
@@ -422,14 +470,33 @@ class Game:
         # Clear revealed tiles
         self.revealed_tiles = []
         
-        # Regenerate the grid
-        self.populate_grid()
+        # Reset combat timers
+        self.boss_turn_timer = 0
+        self.player_attack_timer = 0
+        
+        # Regenerate the ENTIRE grid with new random layout
+        self.initialize_game()
         
         # Log reset message
-        self.log_combat("Game reset! Press R to reset again.")
+        self.log_combat("New game started! Press R to reset again.")
+                    
+    def is_fight_active(self) -> bool:
+        """Check if any boss or enemy is currently active (face-up and alive)"""
+        for y in range(GRID_SIZE):
+            for x in range(GRID_SIZE):
+                tile = self.grid[y][x]
+                if ((tile.tile_type == TileType.BOSS or tile.tile_type == TileType.ENEMY) and 
+                    tile.state == TileState.FACE_UP and 
+                    tile.health > 0):
+                    return True
+        return False
                     
     def handle_click(self, pos: Tuple[int, int]):
         """Handle mouse click on grid"""
+        # Don't allow clicking during fights
+        if self.is_fight_active():
+            return
+            
         x, y = pos
         
         # Check if click is within grid bounds
@@ -481,6 +548,17 @@ class Game:
                 elif tile.tile_type == TileType.BOSS:
                     self.log_combat(f"Revealed boss: {tile.item_id} (HP: {tile.health})")
                     
+                elif tile.tile_type == TileType.ENEMY:
+                    self.log_combat(f"Revealed enemy: {tile.item_id} (HP: {tile.health})")
+                    
+                # Check for Norfair damage (without Varia suit)
+                if tile.area == AreaType.NORFAIR and not self.inventory.get("varia", False):
+                    self.player_energy -= 25
+                    self.log_combat("Norfair heat damage! -25 energy (Need Varia Suit)")
+                    if self.player_energy <= 0:
+                        self.game_over = True
+                        self.log_combat("GAME OVER - Player defeated!")
+                    
     def can_click_tile(self, x: int, y: int) -> bool:
         """Check if a tile can be clicked (adjacent to revealed tiles or first tile)"""
         # First tile can be anywhere
@@ -524,10 +602,11 @@ class Game:
         # Update energy based on energy tanks
         self.max_energy = 99 + (self.inventory.get("energy_tank", 0) * 100)
         
-        # Update boss combat
+        # Update combat (enemies attack first, then bosses)
         self.boss_turn_timer += 1
         if self.boss_turn_timer >= self.boss_turn_interval:
             self.boss_turn_timer = 0
+            self.process_enemy_turns()  # Enemies attack first
             self.process_boss_turns()
             
         # Update player attacks on bosses (slower)
@@ -535,7 +614,26 @@ class Game:
         if self.player_attack_timer >= self.player_attack_interval:
             self.player_attack_timer = 0
             self.process_player_attacks()
-        
+            
+    def process_enemy_turns(self):
+        """Process enemy attacks on player"""
+        for y in range(GRID_SIZE):
+            for x in range(GRID_SIZE):
+                tile = self.grid[y][x]
+                if (tile.tile_type == TileType.ENEMY and 
+                    tile.state == TileState.FACE_UP and 
+                    tile.health > 0):
+                    
+                    # Enemy attacks player
+                    damage = self.enemy_damage.get(tile.item_id, 3)
+                    self.player_energy -= damage
+                    self.log_combat(f"{tile.item_id} attacks for {damage} damage!")
+                    
+                    if self.player_energy <= 0:
+                        self.game_over = True
+                        self.log_combat("GAME OVER - Player defeated!")
+                        return
+            
     def process_boss_turns(self):
         """Process boss attacks"""
         for y in range(GRID_SIZE):
@@ -556,15 +654,15 @@ class Game:
                         self.log_combat("GAME OVER - Player defeated!")
                         
     def process_player_attacks(self):
-        """Process player attacks on bosses"""
+        """Process player attacks on bosses and enemies"""
         for y in range(GRID_SIZE):
             for x in range(GRID_SIZE):
                 tile = self.grid[y][x]
-                if (tile.tile_type == TileType.BOSS and 
+                if ((tile.tile_type == TileType.BOSS or tile.tile_type == TileType.ENEMY) and 
                     tile.state == TileState.FACE_UP and 
                     tile.health > 0):
                     
-                    # Player attacks boss
+                    # Player attacks boss/enemy
                     damage = self.get_player_damage(tile.item_id)
                     tile.health -= damage
                     self.log_combat(f"Player attacks {tile.item_id} for {damage} damage!")
@@ -572,25 +670,35 @@ class Game:
                     if tile.health <= 0:
                         tile.health = 0
                         tile.state = TileState.DESTROYED
-                        self.boss_defeats[tile.item_id] += 1
                         
-                        # Check for Mother Brain victory
-                        if tile.item_id == "mother_brain_2":
-                            self.game_over = True
-                            self.victory = True
-                            self.log_combat("SAMUS WINS! Mother Brain defeated!")
-                            return
+                        # Handle boss defeats
+                        if tile.tile_type == TileType.BOSS:
+                            self.boss_defeats[tile.item_id] += 1
+                            
+                            # Check for Mother Brain victory
+                            if tile.item_id == "mother_brain_1":
+                                self.game_over = True
+                                self.victory = True
+                                self.log_combat("SAMUS WINS! Mother Brain defeated!")
+                                return
+                            
+                            # Add score for boss defeat
+                            boss_scores = {
+                                "bomb_torizo": 500, "spore_spawn": 800, "kraid": 2000, "crocomire": 1200,
+                                "phantoon": 1500, "botwoon": 1000, "draygon": 1800, "gold_torizo": 1600,
+                                "ridley": 2500, "mother_brain_1": 5000,
+                                "samus_ship": 800, "ceres_station": 600, "golden_four": 4000
+                            }
+                            self.score += boss_scores.get(tile.item_id, 1000)
+                            self.log_combat(f"{tile.item_id} defeated! Score: +{boss_scores.get(tile.item_id, 1000)}")
                         
-                        # Add score for boss defeat
-                        boss_scores = {
-                            "bomb_torizo": 500, "spore_spawn": 800, "kraid": 2000, "crocomire": 1200,
-                            "phantoon": 1500, "botwoon": 1000, "draygon": 1800, "gold_torizo": 1600,
-                            "ridley": 2500, "mother_brain_1": 3000, "mother_brain_2": 2000,
-                            "samus_ship": 800, "ceres_station": 600, "golden_four": 4000
-                        }
-                        self.score += boss_scores.get(tile.item_id, 1000)
-                        
-                        self.log_combat(f"{tile.item_id} defeated! Score: +{boss_scores.get(tile.item_id, 1000)}")
+                        # Handle enemy defeats
+                        elif tile.tile_type == TileType.ENEMY:
+                            enemy_scores = {
+                                "geemer": 25, "skree": 35, "side_hopper": 50, "ciser": 75
+                            }
+                            self.score += enemy_scores.get(tile.item_id, 25)
+                            self.log_combat(f"{tile.item_id} defeated! Score: +{enemy_scores.get(tile.item_id, 25)}")
                         
     def get_boss_damage(self, boss_id: str) -> int:
         """Get boss attack damage"""
@@ -616,7 +724,7 @@ class Game:
         """Get player damage against boss - only beams add damage"""
         base_damage = 10
         
-        # Only beam weapons add to damage
+        # Only beam weapons and screw attack add to damage
         if self.inventory.get("charge", False):
             base_damage += 20
         if self.inventory.get("ice", False):
@@ -627,15 +735,23 @@ class Game:
             base_damage += 20
         if self.inventory.get("plasma", False):
             base_damage += 25
+        if self.inventory.get("screw", False):
+            base_damage += 50  # Screw attack is powerful
             
-        # Missile bonuses
-        base_damage += self.inventory.get("missiles", 0) * 50
-        base_damage += self.inventory.get("supers", 0) * 100
+        # Missile bonuses (reduced scaling)
+        base_damage += self.inventory.get("missiles", 0) * 25
+        base_damage += self.inventory.get("supers", 0) * 50
         
         # Special boss interactions
         if boss_id == "draygon" and self.inventory.get("grapple", False):
             base_damage *= 2
             self.log_combat("Grappling beam bonus vs Draygon!")
+            
+        # Suit bonuses
+        if self.inventory.get("varia", False):
+            base_damage = int(base_damage * 1.25)  # 25% damage boost
+        if self.inventory.get("gravity", False):
+            base_damage = int(base_damage * 1.5)   # 50% damage boost
             
         return base_damage
         
@@ -693,6 +809,15 @@ class Game:
                         if tile.health > 0:
                             self.draw_health_bar(screen_x, screen_y + TILE_SIZE + 2, 
                                                tile.health, tile.max_health)
+                                               
+                    elif tile.tile_type == TileType.ENEMY:
+                        self.sprite_manager.draw_enemy(self.screen, tile.item_id, 
+                                                     screen_x, screen_y, TILE_SIZE)
+                        
+                        # Draw enemy health bar at bottom
+                        if tile.health > 0:
+                            self.draw_health_bar(screen_x, screen_y + TILE_SIZE + 2, 
+                                               tile.health, tile.max_health)
                 elif tile.state == TileState.DESTROYED:
                     # Draw destroyed boss as grayscaled sprite
                     pygame.draw.rect(self.screen, BLACK, 
@@ -700,10 +825,13 @@ class Game:
                     pygame.draw.rect(self.screen, GRAY, 
                                    (screen_x, screen_y, TILE_SIZE, TILE_SIZE), 2)
                     
-                    # Draw grayscaled boss sprite
+                    # Draw grayscaled boss/enemy sprite
                     if tile.tile_type == TileType.BOSS:
                         self.sprite_manager.draw_boss_grayed(self.screen, tile.item_id, 
-                                                          screen_x, screen_y, TILE_SIZE)
+                                                           screen_x, screen_y, TILE_SIZE)
+                    elif tile.tile_type == TileType.ENEMY:
+                        self.sprite_manager.draw_enemy_grayed(self.screen, tile.item_id, 
+                                                            screen_x, screen_y, TILE_SIZE)
                                             
     def draw_health_bar(self, x: int, y: int, current: int, maximum: int):
         """Draw a health bar above a tile"""
@@ -722,8 +850,8 @@ class Game:
         x = 10
         y = 10
         
-        # Calculate full tanks and remainder
-        full_tanks = self.player_energy // 100
+        # Calculate total tanks based on max energy
+        total_tanks = self.max_energy // 100
         remainder = self.player_energy % 100
         
         # Draw tanks in rows (7 per row like SM)
@@ -731,12 +859,23 @@ class Game:
         tank_size = 16
         tank_spacing = 2
         
-        for i in range(full_tanks):
+        for i in range(total_tanks):
             row = i // tanks_per_row
             col = i % tanks_per_row
             tank_x = x + col * (tank_size + tank_spacing)
             tank_y = y + row * (tank_size + tank_spacing)
-            pygame.draw.rect(self.screen, BRINSTAR_GREEN, (tank_x, tank_y, tank_size, tank_size))
+            
+            # Draw tank background
+            pygame.draw.rect(self.screen, WHITE, (tank_x, tank_y, tank_size, tank_size), 1)
+            
+            # Determine if this tank is full or empty
+            tank_start_energy = i * 100
+            tank_end_energy = (i + 1) * 100
+            
+            if self.player_energy >= tank_end_energy:
+                # Full tank
+                pygame.draw.rect(self.screen, BRINSTAR_GREEN, (tank_x + 1, tank_y + 1, tank_size - 2, tank_size - 2))
+            # Empty tank - no fill (shows as empty square)
             
         # Draw remainder number to the right of squares
         if remainder > 0:
@@ -811,23 +950,23 @@ class Game:
         
         # Combat log
         font_small = pygame.font.Font(None, 16)
-        for i, message in enumerate(self.combat_log[-25:]):  # Show more messages
+        for i, message in enumerate(self.combat_log[-30:]):  # Show more messages
             text = font_small.render(message, True, WHITE)
             self.screen.blit(text, (x + 10, y + 40 + i * 18))
             
-        # Current stats at bottom
-        y_stats = y + height - 80  # Moved up to make room for GAME OVER
+        # Current stats at bottom (fixed position)
+        y_stats = y + height - 80
         stats_font = pygame.font.Font(None, 20)
         
-        # Game over/victory message (above stats)
+        # Game over/victory message (fixed position, doesn't push stats)
         if self.game_over:
             game_over_font = pygame.font.Font(None, 32)
             if self.victory:
                 message_text = game_over_font.render("SAMUS WINS", True, BRINSTAR_GREEN)
             else:
                 message_text = game_over_font.render("GAME OVER", True, NORFAIR_RED)
-            self.screen.blit(message_text, (x + 10, y_stats))
-            y_stats += 35  # Move stats down after message
+            # Show message at fixed position above stats
+            self.screen.blit(message_text, (x + 10, y_stats - 40))
         
         # Player damage
         damage = self.get_player_damage("")  # Get base damage
@@ -868,7 +1007,7 @@ class Game:
             icon_x = start_x + col * (icon_size + spacing)
             icon_y = y + row * (icon_size + spacing)
             
-            # Draw boss icon
+            # Draw boss icon (no counters, just defeated/not defeated)
             if self.boss_defeats[boss_id] > 0:
                 # Defeated - show normal sprite
                 self.sprite_manager.draw_boss(self.screen, boss_id, icon_x, icon_y, icon_size)
@@ -876,11 +1015,6 @@ class Game:
                 # Not defeated - show grayed out
                 self.sprite_manager.draw_boss_grayed(self.screen, boss_id, icon_x, icon_y, icon_size)
                 
-            # Draw defeat count
-            if self.boss_defeats[boss_id] > 0:
-                count_font = pygame.font.Font(None, 16)
-                count_text = count_font.render(str(self.boss_defeats[boss_id]), True, WHITE)
-                self.screen.blit(count_text, (icon_x + 20, icon_y + 20))
         
     def run(self):
         """Main game loop"""
@@ -898,6 +1032,7 @@ class SpriteManager:
     def __init__(self):
         self.boss_sprites = {}
         self.item_sprites = {}
+        self.enemy_sprites = {}
         self.load_sprites()
         
     def load_sprites(self):
@@ -910,6 +1045,10 @@ class SpriteManager:
             # Load item sprites  
             item_sheet = pygame.image.load("item_sprites.png").convert_alpha()
             self.item_sprites = self.load_sprite_sheet(item_sheet, 16, 16)
+            
+            # Load enemy sprites (4 enemies in a row, 32x32 each)
+            enemy_sheet = pygame.image.load("enemies.png").convert_alpha()
+            self.enemy_sprites = self.load_enemy_sprites(enemy_sheet, 32, 32)
             
         except pygame.error as e:
             print(f"Error loading sprites: {e}")
@@ -968,6 +1107,20 @@ class SpriteManager:
             
         return sprites
         
+    def load_enemy_sprites(self, sheet: pygame.Surface, sprite_width: int, sprite_height: int) -> Dict[str, pygame.Surface]:
+        """Load enemy sprites from a single row sheet"""
+        sprites = {}
+        enemy_names = ["geemer", "skree", "side_hopper", "ciser"]
+        
+        for i, name in enumerate(enemy_names):
+            x = i * sprite_width
+            y = 0
+            sprite = pygame.Surface((sprite_width, sprite_height), pygame.SRCALPHA)
+            sprite.blit(sheet, (0, 0), (x, y, sprite_width, sprite_height))
+            sprites[name] = sprite
+            
+        return sprites
+        
     def draw_boss(self, screen: pygame.Surface, boss_id: str, x: int, y: int, size: int):
         """Draw a boss sprite"""
         if boss_id in self.boss_sprites:
@@ -998,6 +1151,25 @@ class SpriteManager:
         """Draw a grayed out boss sprite"""
         if boss_id in self.boss_sprites:
             sprite = self.boss_sprites[boss_id]
+            scaled_sprite = pygame.transform.scale(sprite, (size, size))
+            
+            # Create a grayed out version
+            grayed = scaled_sprite.copy()
+            grayed.fill((128, 128, 128, 128), special_flags=pygame.BLEND_RGBA_MULT)
+            
+            screen.blit(grayed, (x, y))
+            
+    def draw_enemy(self, screen: pygame.Surface, enemy_id: str, x: int, y: int, size: int):
+        """Draw an enemy sprite (scaled up from 32x32 to match boss size)"""
+        if enemy_id in self.enemy_sprites:
+            sprite = self.enemy_sprites[enemy_id]
+            scaled_sprite = pygame.transform.scale(sprite, (size, size))
+            screen.blit(scaled_sprite, (x, y))
+            
+    def draw_enemy_grayed(self, screen: pygame.Surface, enemy_id: str, x: int, y: int, size: int):
+        """Draw a grayscaled enemy sprite (scaled up from 32x32)"""
+        if enemy_id in self.enemy_sprites:
+            sprite = self.enemy_sprites[enemy_id]
             scaled_sprite = pygame.transform.scale(sprite, (size, size))
             
             # Create a grayed out version
