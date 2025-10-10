@@ -25,7 +25,7 @@ INVENTORY_Y = 10  # Moved up
 HUD_WIDTH = 300  # Width for right-side combat info
 COMBAT_INFO_X = GRID_START_X + (GRID_SIZE * TILE_SIZE) + 20  # Right of grid with 10px spacing
 BOSS_HUD_WIDTH = 200  # Width for boss tracker
-BOSS_HUD_X = SCREEN_WIDTH - BOSS_HUD_WIDTH - 10  # Top right corner
+BOSS_HUD_X = SCREEN_WIDTH - BOSS_HUD_WIDTH - 20  # Top right corner
 
 # Colors
 BLACK = (0, 0, 0)
@@ -152,11 +152,11 @@ class Game:
             "gravity": False,   # Unique item (suit)
         }
         
-        # Initialize boss defeats tracking (no ship, ceres_station, or golden_four)
+        # Initialize boss defeats tracking (no ship or golden_four)
         boss_list = [
             "bomb_torizo", "spore_spawn", "kraid", "crocomire",
             "phantoon", "botwoon", "draygon", "gold_torizo",
-            "ridley", "mother_brain_1"
+            "ridley", "mother_brain_1", "ceres_station"
         ]
         self.boss_defeats = {boss: 0 for boss in boss_list}
         
@@ -196,15 +196,15 @@ class Game:
                 "color": MARIDIA_BLUE
             },
             AreaType.TOURIAN: {
-                "bosses": ["mother_brain_1"],
-                "unique_items": ["xray", "gravity"],
+                "bosses": ["mother_brain_1", "mother_brain_2"],
+                "unique_items": ["xray"],
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
                 "enemies": ["side_hopper", "ciser"],
                 "color": TOURIAN_YELLOW
             },
             AreaType.WRECKED_SHIP: {
                 "bosses": ["phantoon"],
-                "unique_items": [],  # No unique items in Wrecked Ship
+                "unique_items": ["gravity"],  # Gravity Suit found in Wrecked Ship
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
                 "enemies": ["geemer", "skree"],
                 "color": WRECKED_SHIP_PURPLE
@@ -230,6 +230,7 @@ class Game:
             "gold_torizo": 3000,
             "ridley": 6000,
             "mother_brain_1": 8000,
+            "mother_brain_2": 4000,
             "samus_ship": 0,  # Ship has no health - it's the starting point
             "ceres_station": 1000,
             "golden_four": 6000
@@ -254,41 +255,60 @@ class Game:
         # Create area map (hidden from player)
         self.area_map = [[None for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
         
-        # Step 1: Build connected areas first using seed points
-        area_types = list(areas.keys())
-        area_seeds = []
+        # Step 1: Define all area types that MUST be placed
+        all_area_types = list(areas.keys())
         
-        # Place area seed points with good spacing
-        seed_positions = [
-            (2, 2), (7, 2), (2, 7), (7, 7), (4, 4), (0, 0), (9, 0)
-        ]
+        # Step 2: Place each area type with guaranteed minimum size and connectivity
+        for area_type in all_area_types:
+            # Find a suitable starting position
+            attempts = 0
+            while attempts < 50:  # Prevent infinite loops
+                if area_type == AreaType.CRATERIA:
+                    # Crateria should start near top-left (ship location)
+                    start_x, start_y = random.randint(0, 3), random.randint(0, 3)
+                elif area_type == AreaType.TOURIAN:
+                    # Tourian should be in a corner (Mother Brain's lair)
+                    corner = random.choice([(0, 0), (9, 0), (0, 9), (9, 9)])
+                    start_x, start_y = corner
+                elif area_type == AreaType.WRECKED_SHIP:
+                    # Wrecked ship should be smaller and isolated
+                    start_x, start_y = random.randint(1, 8), random.randint(1, 8)
+                else:
+                    # Other areas can be anywhere
+                    start_x, start_y = random.randint(1, 8), random.randint(1, 8)
+                
+                # Check if this position is available
+                if self.area_map[start_y][start_x] is None:
+                    break
+                attempts += 1
+            
+            # If we couldn't find a spot, pick the first available None
+            if attempts >= 50:
+                for y in range(GRID_SIZE):
+                    for x in range(GRID_SIZE):
+                        if self.area_map[y][x] is None:
+                            start_x, start_y = x, y
+                            break
+                    else:
+                        continue
+                    break
+            
+            # Determine area size based on type
+            if area_type == AreaType.WRECKED_SHIP:
+                area_size = random.randint(6, 12)  # Smaller area
+            elif area_type == AreaType.CERES:
+                area_size = random.randint(8, 15)  # Medium area
+            else:
+                area_size = random.randint(12, 25)  # Larger areas
+            
+            # Create the connected area
+            self.flood_fill_area(start_x, start_y, area_type, area_size)
         
-        for i, (x, y) in enumerate(seed_positions):
-            if i < len(area_types):
-                area_type = area_types[i]
-                area_seeds.append((x, y, area_type))
-        
-        # Step 2: Build connected areas from seed points
-        for x, y, area_type in area_seeds:
-            # Determine area size randomly (12-25 tiles)
-            area_size = random.randint(12, 25)
-            self.flood_fill_area(x, y, area_type, area_size)
-        
-        # Step 3: Fill remaining areas with random assignment
+        # Step 3: Fill any remaining None areas with Crateria (default)
         for y in range(GRID_SIZE):
             for x in range(GRID_SIZE):
                 if self.area_map[y][x] is None:
-                    # Randomly assign to one of the existing areas
-                    existing_areas = []
-                    for ay in range(GRID_SIZE):
-                        for ax in range(GRID_SIZE):
-                            if self.area_map[ay][ax] is not None:
-                                existing_areas.append(self.area_map[ay][ax])
-                    
-                    if existing_areas:
-                        self.area_map[y][x] = random.choice(existing_areas)
-                    else:
-                        self.area_map[y][x] = AreaType.CRATERIA
+                    self.area_map[y][x] = AreaType.CRATERIA
         
         # Step 4: Place bosses within their appropriate areas
         self.boss_placements = {}
@@ -319,23 +339,42 @@ class Game:
         self.place_items_in_areas(areas, boss_health, enemy_health)
         
     def flood_fill_area(self, start_x: int, start_y: int, area_type: AreaType, max_tiles: int):
-        """Flood fill to create connected area around a boss"""
+        """Flood fill to create connected area with better connectivity"""
         if self.area_map[start_y][start_x] is not None:
             return
             
+        # Use a more sophisticated flood fill that prioritizes connectivity
         stack = [(start_x, start_y)]
         placed = 0
+        visited = set()
         
         while stack and placed < max_tiles:
             x, y = stack.pop(0)
-            if (0 <= x < GRID_SIZE and 0 <= y < GRID_SIZE and 
-                self.area_map[y][x] is None):
-                self.area_map[y][x] = area_type
-                placed += 1
+            
+            # Skip if already visited or out of bounds
+            if (x, y) in visited or not (0 <= x < GRID_SIZE and 0 <= y < GRID_SIZE):
+                continue
                 
-                # Add adjacent tiles to stack
-                for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-                    stack.append((x + dx, y + dy))
+            # Skip if already assigned
+            if self.area_map[y][x] is not None:
+                continue
+                
+            self.area_map[y][x] = area_type
+            placed += 1
+            visited.add((x, y))
+            
+            # Add neighbors with priority: cardinals first, then diagonals
+            # This ensures better connectivity
+            neighbors = [
+                (x, y-1), (x, y+1), (x-1, y), (x+1, y),  # Cardinals first
+                (x-1, y-1), (x+1, y-1), (x-1, y+1), (x+1, y+1)  # Diagonals second
+            ]
+            
+            for nx, ny in neighbors:
+                if ((nx, ny) not in visited and 
+                    0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE and 
+                    self.area_map[ny][nx] is None):
+                    stack.append((nx, ny))
                     
     def find_nearest_area(self, x: int, y: int) -> AreaType:
         """Find the nearest area type"""
@@ -362,7 +401,8 @@ class Game:
                 tile.health = 0
                 tile.max_health = 0
                 self.revealed_tiles.append((x, y))
-                self.log_combat("Welcome to Crateria! Your ship awaits.")
+                self.log_combat("You've arrived at Zebes.")
+                self.log_combat("destroy Mother Brain to save Samus.")
             else:
                 tile = Tile(x, y, TileType.BOSS, boss_id, area_type)
                 tile.health = boss_health[boss_id]
@@ -439,7 +479,7 @@ class Game:
         boss_list = [
             "bomb_torizo", "spore_spawn", "kraid", "crocomire",
             "phantoon", "botwoon", "draygon", "gold_torizo",
-            "ridley", "mother_brain_1"
+            "ridley", "mother_brain_1", "ceres_station"
         ]
         self.boss_defeats = {boss: 0 for boss in boss_list}
         
@@ -675,6 +715,22 @@ class Game:
                         if tile.tile_type == TileType.BOSS:
                             self.boss_defeats[tile.item_id] += 1
                             
+                            # Special Ceres Station handling
+                            if tile.item_id == "ceres_station":
+                                self.log_combat("You saved Ceres Station!")
+                                self.log_combat("Ridley's life down by 1000!")
+                                # Reduce Ridley's health if he exists
+                                for y2 in range(GRID_SIZE):
+                                    for x2 in range(GRID_SIZE):
+                                        ridley_tile = self.grid[y2][x2]
+                                        if (ridley_tile.tile_type == TileType.BOSS and 
+                                            ridley_tile.item_id == "ridley" and 
+                                            ridley_tile.health > 0):
+                                            ridley_tile.health = max(0, ridley_tile.health - 1000)
+                                            self.log_combat(f"Ridley's health reduced to {ridley_tile.health}!")
+                                self.score += 600
+                                continue
+                            
                             # Check for Mother Brain victory
                             if tile.item_id == "mother_brain_1":
                                 self.game_over = True
@@ -686,8 +742,8 @@ class Game:
                             boss_scores = {
                                 "bomb_torizo": 500, "spore_spawn": 800, "kraid": 2000, "crocomire": 1200,
                                 "phantoon": 1500, "botwoon": 1000, "draygon": 1800, "gold_torizo": 1600,
-                                "ridley": 2500, "mother_brain_1": 5000,
-                                "samus_ship": 800, "ceres_station": 600, "golden_four": 4000
+                                "ridley": 2500, "mother_brain_1": 5000, "mother_brain_2": 3000,
+                                "samus_ship": 800, "golden_four": 4000
                             }
                             self.score += boss_scores.get(tile.item_id, 1000)
                             self.log_combat(f"{tile.item_id} defeated! Score: +{boss_scores.get(tile.item_id, 1000)}")
@@ -805,19 +861,17 @@ class Game:
                         self.sprite_manager.draw_boss(self.screen, tile.item_id, 
                                                     screen_x, screen_y, TILE_SIZE)
                         
-                        # Draw boss health bar at bottom
-                        if tile.health > 0:
-                            self.draw_health_bar(screen_x, screen_y + TILE_SIZE + 2, 
-                                               tile.health, tile.max_health)
+                        # Draw boss health bar at bottom (always show for bosses)
+                        self.draw_health_bar(screen_x, screen_y + TILE_SIZE + 2, 
+                                           tile.health, tile.max_health)
                                                
                     elif tile.tile_type == TileType.ENEMY:
                         self.sprite_manager.draw_enemy(self.screen, tile.item_id, 
                                                      screen_x, screen_y, TILE_SIZE)
                         
-                        # Draw enemy health bar at bottom
-                        if tile.health > 0:
-                            self.draw_health_bar(screen_x, screen_y + TILE_SIZE + 2, 
-                                               tile.health, tile.max_health)
+                        # Draw enemy health bar at bottom (always show for enemies)
+                        self.draw_health_bar(screen_x, screen_y + TILE_SIZE + 2, 
+                                           tile.health, tile.max_health)
                 elif tile.state == TileState.DESTROYED:
                     # Draw destroyed boss as grayscaled sprite
                     pygame.draw.rect(self.screen, BLACK, 
@@ -834,15 +888,19 @@ class Game:
                                                             screen_x, screen_y, TILE_SIZE)
                                             
     def draw_health_bar(self, x: int, y: int, current: int, maximum: int):
-        """Draw a health bar above a tile"""
+        """Draw a health bar below a tile"""
         bar_width = TILE_SIZE
-        bar_height = 6
+        bar_height = 8  # Made slightly thicker
         health_ratio = current / maximum if maximum > 0 else 0
         
-        # Background
-        pygame.draw.rect(self.screen, NORFAIR_RED, (x, y, bar_width, bar_height))
-        # Health
-        pygame.draw.rect(self.screen, BRINSTAR_GREEN, (x, y, int(bar_width * health_ratio), bar_height))
+        # Background (dark red)
+        pygame.draw.rect(self.screen, (120, 0, 0), (x, y, bar_width, bar_height))
+        # Border
+        pygame.draw.rect(self.screen, WHITE, (x, y, bar_width, bar_height), 1)
+        # Health (bright green)
+        if health_ratio > 0:
+            health_width = int(bar_width * health_ratio)
+            pygame.draw.rect(self.screen, (0, 255, 0), (x, y, health_width, bar_height))
         
     def draw_energy_display(self):
         """Draw energy display like Metroid (tanks + remainder)"""
@@ -877,17 +935,18 @@ class Game:
                 pygame.draw.rect(self.screen, BRINSTAR_GREEN, (tank_x + 1, tank_y + 1, tank_size - 2, tank_size - 2))
             # Empty tank - no fill (shows as empty square)
             
-        # Draw remainder number to the right of squares
-        if remainder > 0:
-            number_x = x + (tanks_per_row * (tank_size + tank_spacing)) + 10
-            energy_text = font.render(str(remainder), True, WHITE)
-            self.screen.blit(energy_text, (number_x, y))
+        # Draw remainder number to the right of squares (always show)
+        # Calculate position based on actual number of tanks drawn
+        actual_tanks_this_row = min(total_tanks, tanks_per_row)
+        number_x = x + (actual_tanks_this_row * (tank_size + tank_spacing)) + 15
+        energy_text = font.render(str(remainder), True, WHITE)
+        self.screen.blit(energy_text, (number_x, y))
         
     def draw_inventory(self):
         """Draw the two-row inventory bar to the right of energy display"""
         # Start inventory to the right of energy display
-        start_x = 200  # Right of energy tanks
-        y = INVENTORY_Y + 5
+        start_x = 320  # Right of energy tanks
+        y = INVENTORY_Y
         
         # Organize items into two rows
         items = list(self.inventory.keys())
@@ -945,14 +1004,14 @@ class Game:
         
         # Title
         font = pygame.font.Font(None, 24)
-        title = font.render("Combat Log", True, WHITE)
+        title = font.render("Log", True, WHITE)
         self.screen.blit(title, (x + 10, y + 10))
         
         # Combat log
         font_small = pygame.font.Font(None, 16)
         for i, message in enumerate(self.combat_log[-30:]):  # Show more messages
             text = font_small.render(message, True, WHITE)
-            self.screen.blit(text, (x + 10, y + 40 + i * 18))
+            self.screen.blit(text, (x + 10, y + 30 + i * 16))  # Reduced spacing and moved up
             
         # Current stats at bottom (fixed position)
         y_stats = y + height - 80
@@ -984,17 +1043,17 @@ class Game:
     def draw_boss_tracker(self):
         """Draw boss tracker in top right (like item HUD)"""
         x = BOSS_HUD_X
-        y = INVENTORY_Y + 5
+        y = INVENTORY_Y
         
         # Boss icons in two rows (no background, no title) - removed ship, ceres_station, and golden_four
         boss_list = [
             "bomb_torizo", "spore_spawn", "kraid", "crocomire",
             "phantoon", "botwoon", "draygon", "gold_torizo",
-            "ridley", "mother_brain_1", "mother_brain_2"
+            "ridley", "mother_brain_1"
         ]
         
         icon_size = 32  # Match item HUD size
-        icons_per_row = 6  # Even rows: 6 per row for 11 bosses
+        icons_per_row = 5  # Even rows: 6 per row for 11 bosses
         spacing = 2
         
         # Calculate starting position to right-align
