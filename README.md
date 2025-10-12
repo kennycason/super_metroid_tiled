@@ -1,4 +1,4 @@
-# Super Metroid Memory Battle
+# Super Metroid Tiled
 
 A tile-flipping memory game with boss battles and item collection inspired by Super Metroid.
 
