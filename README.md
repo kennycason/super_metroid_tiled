@@ -2,6 +2,17 @@
 
 A tile-flipping memory game with boss battles and item collection inspired by Super Metroid.
 
+## Screenshots
+
+<p align="center">
+  <img src="screenshot.png" alt="Game Screenshot 1" width="48%" />
+  <img src="screenshot02.png" alt="Game Screenshot 2" width="48%" />
+</p>
+<p align="center">
+  <img src="screenshot03.png" alt="Game Screenshot 3" width="48%" />
+  <img src="screenshot04.png" alt="Game Screenshot 4" width="48%" />
+</p>
+
 ## Overview
 
 Navigate a 10x10 grid of face-down tiles representing different areas from Super Metroid. Reveal tiles adjacent to already-revealed tiles to collect items, defeat enemies, and ultimately destroy Mother Brain to win!
