@@ -32,6 +32,7 @@ BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 GRAY = (128, 128, 128)
 DARK_GRAY = (64, 64, 64)
+DARKER_GRAY = (51, 51, 51)  # #333 for Log panel background
 # Super Metroid themed colors (darker, more authentic)
 CRATERIA_LIGHT_BLUE = (100, 150, 200)  # Light blue for Crateria
 BRINSTAR_GREEN = (0, 120, 0)      # Darker green for Brinstar
@@ -68,6 +69,57 @@ class GameState(Enum):
     """Overall game state"""
     PLAYING = "playing"
     GAME_OVER = "game_over"
+
+def get_display_name(entity_id: str) -> str:
+    """Get a nice display name for enemies, bosses, and items (standalone function)"""
+    display_names = {
+        # Bosses
+        "mother_brain_1": "Mother Brain",
+        "mother_brain_2": "Mother Brain Phase 2",
+        "ridley": "Ridley",
+        "kraid": "Kraid",
+        "phantoon": "Phantoon",
+        "draygon": "Draygon",
+        "bomb_torizo": "Bomb Torizo",
+        "gold_torizo": "Gold Torizo",
+        "spore_spawn": "Spore Spawn",
+        "crocomire": "Crocomire",
+        "botwoon": "Botwoon",
+        "ceres_station": "Ceres Station",
+        "samus_ship": "Samus' Ship",
+        "golden_four": "Golden Four",
+        # Enemies
+        "geemer": "Geemer",
+        "skree": "Skree",
+        "side_hopper": "Side Hopper",
+        "ciser": "Ciser",
+        # Items - Consumables
+        "missiles": "Missiles",
+        "supers": "Super Missiles",
+        "power_bombs": "Power Bombs",
+        "energy_tank": "Energy Tank",
+        # Items - Movement
+        "morph": "Morph Ball",
+        "bomb": "Bombs",
+        "hijump": "High Jump Boots",
+        "speed": "Speed Booster",
+        "spring": "Spring Ball",
+        "space": "Space Jump",
+        "screw": "Screw Attack",
+        # Items - Beams
+        "charge": "Charge Beam",
+        "spazer": "Spazer Beam",
+        "wave": "Wave Beam",
+        "ice": "Ice Beam",
+        "plasma": "Plasma Beam",
+        # Items - Utility
+        "grapple": "Grapple Beam",
+        "xray": "X-ray Scope",
+        # Items - Suits
+        "varia": "Varia Suit",
+        "gravity": "Gravity Suit"
+    }
+    return display_names.get(entity_id, entity_id.replace("_", " ").title())
 
 class Tile:
     """Represents a single tile on the grid"""
@@ -346,9 +398,9 @@ class Game:
                     if fallback_positions:
                         x, y = random.choice(fallback_positions)
                         self.boss_placements[(x, y)] = (boss_id, area_type)
-                        print(f"Warning: {boss_id} placed in small area without distance check")
+                        print(f"Warning: {get_display_name(boss_id)} placed in small area without distance check")
                     else:
-                        print(f"ERROR: Could not place {boss_id} - no tiles in {area_type}")
+                        print(f"ERROR: Could not place {get_display_name(boss_id)} - no tiles in {area_type}")
         
         # Step 5: Place unique items, consumables, and enemies in correct areas
         self.place_items_in_areas(areas, boss_health, enemy_health)
@@ -576,18 +628,19 @@ class Game:
                 
                 # Handle item collection
                 if tile.tile_type == TileType.ITEM:
+                    display_name = self.get_display_name(tile.item_id)
                     # Check if item already collected (for unique items)
                     if isinstance(self.inventory[tile.item_id], bool):
                         if self.inventory[tile.item_id]:
-                            self.log_combat(f"Already have {tile.item_id}!")
+                            self.log_combat(f"Already have {display_name}!")
                             return
                         else:
                             self.inventory[tile.item_id] = True
-                            self.log_combat(f"Collected {tile.item_id}!")
+                            self.log_combat(f"Collected {display_name}!")
                     else:
                         # Consumable item
                         self.inventory[tile.item_id] += 1
-                        self.log_combat(f"Collected {tile.item_id}! Total: {self.inventory[tile.item_id]}")
+                        self.log_combat(f"Collected {display_name}! Total: {self.inventory[tile.item_id]}")
                     
                     # Add score for item collection
                     item_scores = {
@@ -610,10 +663,12 @@ class Game:
                         self.auto_grab_adjacent_items(grid_x, grid_y)
                     
                 elif tile.tile_type == TileType.BOSS:
-                    self.log_combat(f"Revealed boss: {tile.item_id} (HP: {tile.health})")
+                    display_name = self.get_display_name(tile.item_id)
+                    self.log_combat(f"Revealed boss: {display_name} (HP: {tile.health})")
                     
                 elif tile.tile_type == TileType.ENEMY:
-                    self.log_combat(f"Revealed enemy: {tile.item_id} (HP: {tile.health})")
+                    display_name = self.get_display_name(tile.item_id)
+                    self.log_combat(f"Revealed enemy: {display_name} (HP: {tile.health})")
                     
                 # Check for Norfair damage (without Varia suit)
                 if tile.area == AreaType.NORFAIR and not self.inventory.get("varia", False):
@@ -666,14 +721,15 @@ class Game:
                 self.revealed_tiles.append((diag_x, diag_y))
                 
                 # Collect the item
+                display_name = self.get_display_name(tile.item_id)
                 if isinstance(self.inventory[tile.item_id], bool):
                     if not self.inventory[tile.item_id]:
                         self.inventory[tile.item_id] = True
-                        self.log_combat(f"X-ray auto-collected {tile.item_id}!")
+                        self.log_combat(f"X-ray auto-collected {display_name}!")
                 else:
                     # Consumable item
                     self.inventory[tile.item_id] += 1
-                    self.log_combat(f"X-ray auto-collected {tile.item_id}! Total: {self.inventory[tile.item_id]}")
+                    self.log_combat(f"X-ray auto-collected {display_name}! Total: {self.inventory[tile.item_id]}")
                 
                 # Add score for item collection
                 item_scores = {
@@ -712,11 +768,15 @@ class Game:
         }
         return area_colors.get(area_type, DARK_GRAY)
         
+    def get_display_name(self, entity_id: str) -> str:
+        """Get a nice display name for enemies and bosses (wrapper for standalone function)"""
+        return get_display_name(entity_id)
+        
     def log_combat(self, message: str):
         """Add a message to the combat log"""
         self.combat_log.append(message)
         # Keep only last 20 messages
-        if len(self.combat_log) > 20:
+        if len(self.combat_log) > 28:
             self.combat_log.pop(0)
         print(message)  # Also print to console
         
@@ -784,14 +844,16 @@ class Game:
                     
                     # Check if enemy is frozen
                     if tile.frozen:
-                        self.log_combat(f"{tile.item_id} is frozen and skips turn!")
+                        display_name = self.get_display_name(tile.item_id)
+                        self.log_combat(f"{display_name} is frozen and skips turn!")
                         tile.frozen = False  # Unfreeze after turn
                         continue
                     
                     # Enemy attacks player
                     damage = self.enemy_damage.get(tile.item_id, 3)
                     self.player_energy -= damage
-                    self.log_combat(f"{tile.item_id} attacks for {damage} damage!")
+                    display_name = self.get_display_name(tile.item_id)
+                    self.log_combat(f"{display_name} attacks for {damage} damage!")
                     
                     if self.player_energy <= 0:
                         self.game_over = True
@@ -809,14 +871,16 @@ class Game:
                     
                     # Check if boss is frozen
                     if tile.frozen:
-                        self.log_combat(f"{tile.item_id} is frozen and skips turn!")
+                        display_name = self.get_display_name(tile.item_id)
+                        self.log_combat(f"{display_name} is frozen and skips turn!")
                         tile.frozen = False  # Unfreeze after turn
                         continue
                     
                     # Boss attacks player
                     damage = self.get_boss_damage(tile.item_id)
                     self.player_energy -= damage
-                    self.log_combat(f"{tile.item_id} attacks for {damage} damage!")
+                    display_name = self.get_display_name(tile.item_id)
+                    self.log_combat(f"{display_name} attacks for {damage} damage!")
                     
                     if self.player_energy <= 0:
                         self.player_energy = 0
@@ -835,13 +899,14 @@ class Game:
                     # Player attacks boss/enemy
                     damage = self.get_player_damage(tile.item_id)
                     tile.health -= damage
-                    self.log_combat(f"Samus attacks {tile.item_id} for {damage} damage!")
+                    display_name = self.get_display_name(tile.item_id)
+                    self.log_combat(f"Samus attacks {display_name} for {damage} dmg!")
                     
                     # Check for ice beam freeze (10% chance)
                     if (self.inventory.get("ice", False) and 
                         tile.health > 0 and 
                         random.random() < 0.10):
-                        self.log_combat(f"{tile.item_id} frozen! Extra turn!")
+                        self.log_combat(f"{display_name} frozen! Extra turn!")
                         # Mark enemy as frozen (skip their next turn)
                         tile.frozen = True
                     
@@ -884,7 +949,8 @@ class Game:
                                 "samus_ship": 800, "golden_four": 4000
                             }
                             self.score += boss_scores.get(tile.item_id, 1000)
-                            self.log_combat(f"{tile.item_id} defeated! Score: +{boss_scores.get(tile.item_id, 1000)}")
+                            display_name = self.get_display_name(tile.item_id)
+                            self.log_combat(f"{display_name} defeated! Score: +{boss_scores.get(tile.item_id, 1000)}")
                         
                         # Handle enemy defeats
                         elif tile.tile_type == TileType.ENEMY:
@@ -892,7 +958,8 @@ class Game:
                                 "geemer": 25, "skree": 35, "side_hopper": 50, "ciser": 75
                             }
                             self.score += enemy_scores.get(tile.item_id, 25)
-                            self.log_combat(f"{tile.item_id} defeated! Score: +{enemy_scores.get(tile.item_id, 25)}")
+                            display_name = self.get_display_name(tile.item_id)
+                            self.log_combat(f"{display_name} defeated! Score: +{enemy_scores.get(tile.item_id, 25)}")
                         
     def get_boss_damage(self, boss_id: str) -> int:
         """Get boss attack damage"""
@@ -1144,7 +1211,7 @@ class Game:
         height = GRID_SIZE * TILE_SIZE  # Same height as grid
         
         # Background
-        pygame.draw.rect(self.screen, DARK_GRAY, (x, y, HUD_WIDTH, height))
+        pygame.draw.rect(self.screen, BLACK, (x, y, HUD_WIDTH, height))
         pygame.draw.rect(self.screen, GRAY, (x, y, HUD_WIDTH, height), 2)
         
         # Title
@@ -1153,7 +1220,7 @@ class Game:
         self.screen.blit(title, (x + 10, y + 10))
         
         # Combat log - calculate how many messages can actually fit
-        font_small = pygame.font.Font(None, 18)  # Bigger text
+        font_small = pygame.font.Font(None, 20)  # Bigger text
         log_start_y = y + 35  # Start below title
         stats_start_y = y + height - 90  # Stats area starts here
         available_height = stats_start_y - log_start_y
