@@ -80,6 +80,7 @@ class Tile:
         self.state = TileState.FACE_DOWN
         self.health = 0  # For bosses
         self.max_health = 0  # For bosses
+        self.frozen = False  # For ice beam freeze effect
         
     def get_screen_position(self) -> Tuple[int, int]:
         """Get the screen position of this tile"""
@@ -168,7 +169,7 @@ class Game:
         # Define themed areas with their bosses and items
         areas = {
             AreaType.CRATERIA: {
-                "bosses": ["samus_ship"],
+                "bosses": ["samus_ship", "bomb_torizo"],
                 "unique_items": [],  # No unique items in Crateria
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
                 "enemies": ["geemer", "skree"],
@@ -176,28 +177,28 @@ class Game:
             },
             AreaType.BRINSTAR: {
                 "bosses": ["kraid", "spore_spawn"],
-                "unique_items": ["morph", "bomb", "charge", "varia", "spazer"],
+                "unique_items": ["morph", "bomb", "charge", "varia", "spazer", "xray"],
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
                 "enemies": ["geemer", "skree", "side_hopper"],
                 "color": BRINSTAR_GREEN
             },
             AreaType.NORFAIR: {
                 "bosses": ["ridley", "crocomire"],
-                "unique_items": ["hijump", "speed", "ice", "screw", "wave"],
+                "unique_items": ["hijump", "speed", "ice", "screw", "wave", "grapple"],
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
                 "enemies": ["skree", "side_hopper", "ciser"],
                 "color": NORFAIR_RED
             },
             AreaType.MARIDIA: {
                 "bosses": ["draygon", "botwoon"],
-                "unique_items": ["grapple", "spring", "space", "plasma"],
+                "unique_items": ["spring", "space", "plasma"],
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
                 "enemies": ["geemer", "ciser"],
                 "color": MARIDIA_BLUE
             },
             AreaType.TOURIAN: {
-                "bosses": ["mother_brain_1", "mother_brain_2"],
-                "unique_items": ["xray"],
+                "bosses": ["mother_brain_1"],  # Only Mother Brain 1 appears in game
+                "unique_items": [],
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
                 "enemies": ["side_hopper", "ciser"],
                 "color": TOURIAN_YELLOW
@@ -210,7 +211,7 @@ class Game:
                 "color": WRECKED_SHIP_PURPLE
             },
             AreaType.CERES: {
-                "bosses": ["ceres_station", "bomb_torizo"],
+                "bosses": ["ceres_station"],
                 "unique_items": [],
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
                 "enemies": ["skree", "side_hopper"],
@@ -295,9 +296,9 @@ class Game:
             
             # Determine area size based on type
             if area_type == AreaType.WRECKED_SHIP:
-                area_size = random.randint(6, 12)  # Smaller area
+                area_size = random.randint(15, 25)  # Larger area to fit boss + gravity suit + items
             elif area_type == AreaType.CERES:
-                area_size = random.randint(8, 15)  # Medium area
+                area_size = random.randint(10, 18)  # Medium area (increased minimum for Ceres Station)
             else:
                 area_size = random.randint(12, 25)  # Larger areas
             
@@ -334,6 +335,20 @@ class Game:
                 if suitable_positions:
                     x, y = random.choice(suitable_positions)
                     self.boss_placements[(x, y)] = (boss_id, area_type)
+                else:
+                    # If no suitable position found, place anyway (relaxed placement for small areas)
+                    fallback_positions = []
+                    for y in range(GRID_SIZE):
+                        for x in range(GRID_SIZE):
+                            if self.area_map[y][x] == area_type:
+                                fallback_positions.append((x, y))
+                    
+                    if fallback_positions:
+                        x, y = random.choice(fallback_positions)
+                        self.boss_placements[(x, y)] = (boss_id, area_type)
+                        print(f"Warning: {boss_id} placed in small area without distance check")
+                    else:
+                        print(f"ERROR: Could not place {boss_id} - no tiles in {area_type}")
         
         # Step 5: Place unique items, consumables, and enemies in correct areas
         self.place_items_in_areas(areas, boss_health, enemy_health)
@@ -435,15 +450,15 @@ class Game:
                     area_data = areas[area_type]
                     
                     rand = random.random()
-                    if rand < 0.2:  # 20% chance for consumable
+                    if rand < 0.20:  # 20% chance for consumable
                         item_id = random.choice(area_data["consumables"])
                         tile = Tile(x, y, TileType.ITEM, item_id, area_type)
-                    elif rand < 0.35:  # 15% chance for enemy
+                    elif rand < 0.40:  # 20% chance for enemy
                         enemy_id = random.choice(area_data["enemies"])
                         tile = Tile(x, y, TileType.ENEMY, enemy_id, area_type)
                         tile.health = enemy_health[enemy_id]
                         tile.max_health = enemy_health[enemy_id]
-                    else:  # 65% empty
+                    else:  # 60% empty
                         tile = Tile(x, y, TileType.EMPTY, "", area_type)
                     
                     self.grid[y][x] = tile
@@ -551,6 +566,11 @@ class Game:
             
             # Check if tile can be clicked (adjacent to revealed tiles or first tile)
             if tile.state == TileState.FACE_DOWN and self.can_click_tile(grid_x, grid_y):
+                # Check for Maridia movement restriction BEFORE processing tile
+                if tile.area == AreaType.MARIDIA and not self.inventory.get("gravity", False):
+                    self.log_combat("Cannot enter Maridia without Gravity Suit!")
+                    return  # Exit early, don't process the tile
+                
                 tile.state = TileState.FACE_UP
                 self.revealed_tiles.append((grid_x, grid_y))
                 
@@ -585,6 +605,10 @@ class Game:
                         self.player_energy = self.max_energy  # Fully heal
                         self.log_combat(f"Energy tank collected! Max energy: {self.max_energy}")
                     
+                    # X-ray scope auto-grabs adjacent tiles if they are items
+                    if self.inventory.get("xray", False):
+                        self.auto_grab_adjacent_items(grid_x, grid_y)
+                    
                 elif tile.tile_type == TileType.BOSS:
                     self.log_combat(f"Revealed boss: {tile.item_id} (HP: {tile.health})")
                     
@@ -594,10 +618,11 @@ class Game:
                 # Check for Norfair damage (without Varia suit)
                 if tile.area == AreaType.NORFAIR and not self.inventory.get("varia", False):
                     self.player_energy -= 25
-                    self.log_combat("Norfair heat damage! -25 energy (Need Varia Suit)")
+                    self.log_combat("Norfair heat damage! -25 energy")
                     if self.player_energy <= 0:
                         self.game_over = True
                         self.log_combat("GAME OVER - Player defeated!")
+                
                     
     def can_click_tile(self, x: int, y: int) -> bool:
         """Check if a tile can be clicked (adjacent to revealed tiles or first tile)"""
@@ -611,6 +636,68 @@ class Game:
                 return True
                 
         return False
+    
+    def auto_grab_adjacent_items(self, x: int, y: int):
+        """Auto-grab diagonal tiles if they are items (X-ray scope ability - forms an X!)"""
+        # Check diagonal directions only (forms an "X" pattern)
+        # Format: (x, y) where x=column, y=row
+        diagonal_positions = [
+            (x-1, y-1),   # top-left
+            (x+1, y-1),   # top-right
+            (x-1, y+1),   # bottom-left
+            (x+1, y+1)    # bottom-right
+        ]
+        
+        for diag_pos in diagonal_positions:
+            diag_x, diag_y = diag_pos
+            # Check bounds
+            if not (0 <= diag_x < GRID_SIZE and 0 <= diag_y < GRID_SIZE):
+                continue
+            
+            tile = self.grid[diag_y][diag_x]
+            
+            # Only auto-grab if it's face-down and is an item
+            if tile.state == TileState.FACE_DOWN and tile.tile_type == TileType.ITEM:
+                # Check for Maridia movement restriction
+                if tile.area == AreaType.MARIDIA and not self.inventory.get("gravity", False):
+                    continue  # Skip Maridia tiles without gravity suit
+                
+                tile.state = TileState.FACE_UP
+                self.revealed_tiles.append((diag_x, diag_y))
+                
+                # Collect the item
+                if isinstance(self.inventory[tile.item_id], bool):
+                    if not self.inventory[tile.item_id]:
+                        self.inventory[tile.item_id] = True
+                        self.log_combat(f"X-ray auto-collected {tile.item_id}!")
+                else:
+                    # Consumable item
+                    self.inventory[tile.item_id] += 1
+                    self.log_combat(f"X-ray auto-collected {tile.item_id}! Total: {self.inventory[tile.item_id]}")
+                
+                # Add score for item collection
+                item_scores = {
+                    "missiles": 10, "supers": 20, "power_bombs": 30, "energy_tank": 50,
+                    "morph": 100, "bomb": 100, "hijump": 150, "speed": 150,
+                    "grapple": 200, "xray": 200, "spring": 150, "space": 200,
+                    "screw": 250, "charge": 150, "spazer": 200, "wave": 200,
+                    "ice": 200, "plasma": 250, "varia": 300, "gravity": 400
+                }
+                self.score += item_scores.get(tile.item_id, 10)
+                
+                # Energy tanks increase max energy and heal fully
+                if tile.item_id == "energy_tank":
+                    self.max_energy += 100
+                    self.player_energy = self.max_energy
+                    self.log_combat(f"Energy tank collected! Max energy: {self.max_energy}")
+                
+                # Check for Norfair damage on auto-grabbed tiles
+                if tile.area == AreaType.NORFAIR and not self.inventory.get("varia", False):
+                    self.player_energy -= 25
+                    self.log_combat("Norfair heat damage! -25 energy")
+                    if self.player_energy <= 0:
+                        self.game_over = True
+                        self.log_combat("GAME OVER - Player defeated!")
         
     def get_area_color(self, area_type: AreaType) -> Tuple[int, int, int]:
         """Get the color for an area type"""
@@ -633,6 +720,26 @@ class Game:
             self.combat_log.pop(0)
         print(message)  # Also print to console
         
+    def get_attack_first_chance(self) -> float:
+        """Calculate chance to attack first based on equipped items"""
+        chance = 0.0
+        
+        # Movement items increase attack first chance by 25%
+        if self.inventory.get("space", False):
+            chance += 0.25
+        if self.inventory.get("hijump", False):
+            chance += 0.25
+        if self.inventory.get("morph", False):
+            chance += 0.25
+        if self.inventory.get("spring", False):
+            chance += 0.25
+        
+        # Speed booster increases by 50%
+        if self.inventory.get("speed", False):
+            chance += 0.50
+        
+        return min(chance, 1.0)  # Cap at 100%
+    
     def update(self):
         """Update game state"""
         # Don't update combat if game over
@@ -642,18 +749,29 @@ class Game:
         # Update energy based on energy tanks
         self.max_energy = 99 + (self.inventory.get("energy_tank", 0) * 100)
         
-        # Update combat (enemies attack first, then bosses)
+        # Update combat - determine attack order based on items
         self.boss_turn_timer += 1
+        player_attacks_first = random.random() < self.get_attack_first_chance()
+        
         if self.boss_turn_timer >= self.boss_turn_interval:
             self.boss_turn_timer = 0
-            self.process_enemy_turns()  # Enemies attack first
-            self.process_boss_turns()
             
-        # Update player attacks on bosses (slower)
-        self.player_attack_timer += 1
-        if self.player_attack_timer >= self.player_attack_interval:
-            self.player_attack_timer = 0
-            self.process_player_attacks()
+            if player_attacks_first and self.is_fight_active():
+                # Player attacks first
+                self.process_player_attacks()
+                self.process_enemy_turns()  # Then enemies
+                self.process_boss_turns()    # Then bosses
+            else:
+                # Normal order: enemies first, then bosses
+                self.process_enemy_turns()
+                self.process_boss_turns()
+            
+        # Update player attacks on bosses (slower) - only if didn't attack first
+        if not player_attacks_first:
+            self.player_attack_timer += 1
+            if self.player_attack_timer >= self.player_attack_interval:
+                self.player_attack_timer = 0
+                self.process_player_attacks()
             
     def process_enemy_turns(self):
         """Process enemy attacks on player"""
@@ -663,6 +781,12 @@ class Game:
                 if (tile.tile_type == TileType.ENEMY and 
                     tile.state == TileState.FACE_UP and 
                     tile.health > 0):
+                    
+                    # Check if enemy is frozen
+                    if tile.frozen:
+                        self.log_combat(f"{tile.item_id} is frozen and skips turn!")
+                        tile.frozen = False  # Unfreeze after turn
+                        continue
                     
                     # Enemy attacks player
                     damage = self.enemy_damage.get(tile.item_id, 3)
@@ -682,6 +806,12 @@ class Game:
                 if (tile.tile_type == TileType.BOSS and 
                     tile.state == TileState.FACE_UP and 
                     tile.health > 0):
+                    
+                    # Check if boss is frozen
+                    if tile.frozen:
+                        self.log_combat(f"{tile.item_id} is frozen and skips turn!")
+                        tile.frozen = False  # Unfreeze after turn
+                        continue
                     
                     # Boss attacks player
                     damage = self.get_boss_damage(tile.item_id)
@@ -705,7 +835,15 @@ class Game:
                     # Player attacks boss/enemy
                     damage = self.get_player_damage(tile.item_id)
                     tile.health -= damage
-                    self.log_combat(f"Player attacks {tile.item_id} for {damage} damage!")
+                    self.log_combat(f"Samus attacks {tile.item_id} for {damage} damage!")
+                    
+                    # Check for ice beam freeze (10% chance)
+                    if (self.inventory.get("ice", False) and 
+                        tile.health > 0 and 
+                        random.random() < 0.10):
+                        self.log_combat(f"{tile.item_id} frozen! Extra turn!")
+                        # Mark enemy as frozen (skip their next turn)
+                        tile.frozen = True
                     
                     if tile.health <= 0:
                         tile.health = 0
@@ -777,10 +915,10 @@ class Game:
         return boss_damage.get(boss_id, 10)
         
     def get_player_damage(self, boss_id: str) -> int:
-        """Get player damage against boss - only beams add damage"""
+        """Get player damage against boss - beams, speed booster, and missiles add damage"""
         base_damage = 10
         
-        # Only beam weapons and screw attack add to damage
+        # Beam weapons and speed booster add to damage
         if self.inventory.get("charge", False):
             base_damage += 20
         if self.inventory.get("ice", False):
@@ -793,15 +931,21 @@ class Game:
             base_damage += 25
         if self.inventory.get("screw", False):
             base_damage += 50  # Screw attack is powerful
+        if self.inventory.get("speed", False):
+            base_damage += 20  # Speed booster adds damage
+        if self.inventory.get("bomb", False):
+            base_damage += 50  # Bombs add significant attack damage
             
-        # Missile bonuses (reduced scaling)
-        base_damage += self.inventory.get("missiles", 0) * 25
-        base_damage += self.inventory.get("supers", 0) * 50
+        # Missile bonuses with proper scaling
+        missile_base = 10  # Base missile damage
+        base_damage += self.inventory.get("missiles", 0) * missile_base
+        base_damage += self.inventory.get("supers", 0) * (missile_base * 2)  # 2x missile damage
+        base_damage += self.inventory.get("power_bombs", 0) * (missile_base * 3)  # 3x missile damage
         
         # Special boss interactions
         if boss_id == "draygon" and self.inventory.get("grapple", False):
-            base_damage *= 2
-            self.log_combat("Grappling beam bonus vs Draygon!")
+            base_damage *= 3
+            self.log_combat("Grappling beam bonus vs Draygon! 3x damage!")
             
         # Suit bonuses
         if self.inventory.get("varia", False):
@@ -861,16 +1005,17 @@ class Game:
                         self.sprite_manager.draw_boss(self.screen, tile.item_id, 
                                                     screen_x, screen_y, TILE_SIZE)
                         
-                        # Draw boss health bar at bottom (always show for bosses)
-                        self.draw_health_bar(screen_x, screen_y + TILE_SIZE + 2, 
-                                           tile.health, tile.max_health)
+                        # Draw boss health bar at bottom of tile (skip ship)
+                        if tile.item_id != "samus_ship":
+                            self.draw_health_bar(screen_x, screen_y + TILE_SIZE - 4, 
+                                               tile.health, tile.max_health)
                                                
                     elif tile.tile_type == TileType.ENEMY:
                         self.sprite_manager.draw_enemy(self.screen, tile.item_id, 
                                                      screen_x, screen_y, TILE_SIZE)
                         
-                        # Draw enemy health bar at bottom (always show for enemies)
-                        self.draw_health_bar(screen_x, screen_y + TILE_SIZE + 2, 
+                        # Draw enemy health bar at bottom of tile (always show for enemies)
+                        self.draw_health_bar(screen_x, screen_y + TILE_SIZE - 4, 
                                            tile.health, tile.max_health)
                 elif tile.state == TileState.DESTROYED:
                     # Draw destroyed boss as grayscaled sprite
@@ -888,9 +1033,9 @@ class Game:
                                                             screen_x, screen_y, TILE_SIZE)
                                             
     def draw_health_bar(self, x: int, y: int, current: int, maximum: int):
-        """Draw a health bar below a tile"""
+        """Draw a health bar at bottom of tile"""
         bar_width = TILE_SIZE
-        bar_height = 8  # Made slightly thicker
+        bar_height = 4  # Half height, on tile
         health_ratio = current / maximum if maximum > 0 else 0
         
         # Background (dark red)
@@ -1007,14 +1152,22 @@ class Game:
         title = font.render("Log", True, WHITE)
         self.screen.blit(title, (x + 10, y + 10))
         
-        # Combat log
-        font_small = pygame.font.Font(None, 16)
-        for i, message in enumerate(self.combat_log[-30:]):  # Show more messages
+        # Combat log - calculate how many messages can actually fit
+        font_small = pygame.font.Font(None, 18)  # Bigger text
+        log_start_y = y + 35  # Start below title
+        stats_start_y = y + height - 90  # Stats area starts here
+        available_height = stats_start_y - log_start_y
+        line_height = 16
+        max_messages = available_height // line_height
+        
+        # Show as many messages as can fit
+        messages_to_show = min(max_messages, len(self.combat_log))
+        for i, message in enumerate(self.combat_log[-messages_to_show:]):
             text = font_small.render(message, True, WHITE)
-            self.screen.blit(text, (x + 10, y + 30 + i * 16))  # Reduced spacing and moved up
+            self.screen.blit(text, (x + 10, log_start_y + i * line_height))
             
         # Current stats at bottom (fixed position)
-        y_stats = y + height - 80
+        y_stats = y + height - 90  # More space for additional messages
         stats_font = pygame.font.Font(None, 20)
         
         # Game over/victory message (fixed position, doesn't push stats)
@@ -1025,7 +1178,7 @@ class Game:
             else:
                 message_text = game_over_font.render("GAME OVER", True, NORFAIR_RED)
             # Show message at fixed position above stats
-            self.screen.blit(message_text, (x + 10, y_stats - 40))
+            self.screen.blit(message_text, (x + 10, y_stats - 50))
         
         # Player damage
         damage = self.get_player_damage("")  # Get base damage
