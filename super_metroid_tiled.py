@@ -12,6 +12,7 @@ from enum import Enum
 
 # Initialize Pygame
 pygame.init()
+pygame.mixer.init()
 
 # Constants
 SCREEN_WIDTH = 1000  # Reduced width
@@ -93,6 +94,7 @@ def get_display_name(entity_id: str) -> str:
         "skree": "Skree",
         "side_hopper": "Side Hopper",
         "ciser": "Ciser",
+        "metroid": "Metroid",
         # Items - Consumables
         "missiles": "Missiles",
         "supers": "Super Missiles",
@@ -120,6 +122,141 @@ def get_display_name(entity_id: str) -> str:
         "gravity": "Gravity Suit"
     }
     return display_names.get(entity_id, entity_id.replace("_", " ").title())
+
+class SoundManager:
+    """Manages all game audio - music and sound effects"""
+    def __init__(self):
+        self.sounds = {}
+        self.current_music = None
+        self.current_area = None
+        self.music_volume = 0.3
+        self.sfx_volume = 0.5
+        self.load_sounds()
+        
+    def load_sounds(self):
+        """Load all sound effects and music"""
+        try:
+            # Load sound effects (WAV)
+            sfx_files = [
+                "ui_click", "beam_shot", "charge_start", "grapple_beam",
+                "ice_shot", "missile_shot", "plasma_shot", "spazer_shot",
+                "ammo_supermissile_shot", "powerbomb_shot", "screw_attack",
+                "shinespark", "spacejump_start", "enemy_death", "explosion",
+                "torizo_damaage"
+            ]
+            
+            for sfx in sfx_files:
+                try:
+                    sound = pygame.mixer.Sound(f"sound/{sfx}.wav")
+                    sound.set_volume(self.sfx_volume)
+                    self.sounds[sfx] = sound
+                except:
+                    print(f"Warning: Could not load sound/{sfx}.wav")
+                    
+        except Exception as e:
+            print(f"Error loading sounds: {e}")
+    
+    def play_area_music(self, area_type: AreaType, phantoon_defeated: bool = False, use_rainstorm: bool = False):
+        """Play music for the current area"""
+        # Map area types to music files
+        if use_rainstorm and area_type == AreaType.CRATERIA:
+            music_file = "crateria_rainstorm"
+        else:
+            area_music = {
+                AreaType.CRATERIA: "crateria_underground",
+                AreaType.BRINSTAR: "brinstar",
+                AreaType.NORFAIR: "lower_norfair",
+                AreaType.MARIDIA: "maridia",
+                AreaType.TOURIAN: "tourian",
+                AreaType.WRECKED_SHIP: "wrecked_ship_activated" if phantoon_defeated else "wrecked_ship",
+                AreaType.CERES: "crateria_underground"  # Use crateria music for Ceres
+            }
+            music_file = area_music.get(area_type)
+        
+        if music_file and music_file != self.current_music:
+            try:
+                pygame.mixer.music.load(f"sound/{music_file}.mp3")
+                pygame.mixer.music.set_volume(self.music_volume)
+                pygame.mixer.music.play(-1)  # Loop indefinitely
+                self.current_music = music_file
+                self.current_area = area_type
+            except Exception as e:
+                print(f"Warning: Could not load music sound/{music_file}.mp3: {e}")
+    
+    def play_boss_music(self, boss_id: str):
+        """Play boss-specific music"""
+        boss_music = {
+            "mother_brain_1": "mother_brain",
+            "mother_brain_2": "mother_brain",
+            "spore_spawn": "spore_spawn",
+            "ridley": "big_boss1",
+            "kraid": "big_boss2",
+            "phantoon": "big_boss2",
+            "draygon": "big_boss2",
+            "gold_torizo": "big_boss1",
+            "bomb_torizo": "big_boss1",
+            "crocomire": "big_boss2"
+        }
+        
+        music_file = boss_music.get(boss_id)
+        if music_file and music_file != self.current_music:
+            try:
+                pygame.mixer.music.load(f"sound/{music_file}.mp3")
+                pygame.mixer.music.set_volume(self.music_volume)
+                pygame.mixer.music.play(-1)
+                self.current_music = music_file
+            except Exception as e:
+                print(f"Warning: Could not load boss music sound/{music_file}.mp3: {e}")
+    
+    def play_sound(self, sound_name: str):
+        """Play a sound effect"""
+        if sound_name in self.sounds:
+            self.sounds[sound_name].play()
+    
+    def play_item_sound(self, item_id: str):
+        """Play sound effect for collecting an item"""
+        item_sounds = {
+            "charge": "charge_start",
+            "grapple": "grapple_beam",
+            "ice": "ice_shot",
+            "plasma": "plasma_shot",
+            "spazer": "spazer_shot",
+            "missiles": "missile_shot",
+            "supers": "ammo_supermissile_shot",
+            "power_bombs": "powerbomb_shot",
+            "screw": "screw_attack",
+            "speed": "shinespark",
+            "space": "spacejump_start",
+            "bomb": "explosion"
+        }
+        
+        sound_name = item_sounds.get(item_id, "ui_click")
+        self.play_sound(sound_name)
+    
+    def play_death_music(self):
+        """Play Samus death music (one-time, not looping)"""
+        try:
+            pygame.mixer.music.load("sound/samus_arans_final_cry.mp3")
+            pygame.mixer.music.set_volume(self.music_volume)
+            pygame.mixer.music.play(0)  # Play once, don't loop
+            self.current_music = "samus_arans_final_cry"
+        except Exception as e:
+            print(f"Warning: Could not load death music sound/samus_arans_final_cry.mp3: {e}")
+    
+    def play_ending_music(self):
+        """Play victory/ending music (one-time, not looping)"""
+        try:
+            pygame.mixer.music.load("sound/ending.mp3")
+            pygame.mixer.music.set_volume(self.music_volume)
+            pygame.mixer.music.play(0)  # Play once, don't loop
+            self.current_music = "ending"
+        except Exception as e:
+            print(f"Warning: Could not load ending music sound/ending.mp3: {e}")
+    
+    def stop_music(self):
+        """Stop the current music"""
+        pygame.mixer.music.stop()
+        self.current_music = None
 
 class Tile:
     """Represents a single tile on the grid"""
@@ -172,6 +309,11 @@ class Game:
         
         # Initialize sprite system
         self.sprite_manager = SpriteManager()
+        
+        # Initialize sound system
+        self.sound_manager = SoundManager()
+        self.last_clicked_area = None  # Track area for music changes
+        self.tiles_clicked = 0  # Track number of tiles clicked (for rainstorm intro)
         
         # Initialize game
         self.initialize_game()
@@ -252,7 +394,7 @@ class Game:
                 "bosses": ["mother_brain_1"],  # Only Mother Brain 1 appears in game
                 "unique_items": [],
                 "consumables": ["missiles", "supers", "power_bombs", "energy_tank"],
-                "enemies": ["side_hopper", "ciser"],
+                "enemies": ["side_hopper", "ciser", "metroid"],
                 "color": TOURIAN_YELLOW
             },
             AreaType.WRECKED_SHIP: {
@@ -294,7 +436,8 @@ class Game:
             "geemer": 50,
             "skree": 75,
             "side_hopper": 100,
-            "ciser": 125
+            "ciser": 125,
+            "metroid": 300  # Tough enemy in Tourian
         }
         
         # Enemy damage values (minor enemies)
@@ -302,7 +445,8 @@ class Game:
             "geemer": 3,
             "skree": 4,
             "side_hopper": 5,
-            "ciser": 6
+            "ciser": 6,
+            "metroid": 15  # Metroids hit hard!
         }
         
         # Create area map (hidden from player)
@@ -470,6 +614,11 @@ class Game:
                 self.revealed_tiles.append((x, y))
                 self.log_combat("You've arrived at Zebes.")
                 self.log_combat("destroy Mother Brain to save Samus.")
+                # Start with rainstorm music for Crateria (ship location is always first tile)
+                use_rainstorm = (area_type == AreaType.CRATERIA)
+                self.sound_manager.play_area_music(area_type, False, use_rainstorm)
+                self.last_clicked_area = area_type
+                self.tiles_clicked = 1  # Count the ship tile as first click
             else:
                 tile = Tile(x, y, TileType.BOSS, boss_id, area_type)
                 tile.health = boss_health[boss_id]
@@ -502,10 +651,10 @@ class Game:
                     area_data = areas[area_type]
                     
                     rand = random.random()
-                    if rand < 0.20:  # 20% chance for consumable
+                    if rand < 0.27:  # % chance for consumable
                         item_id = random.choice(area_data["consumables"])
                         tile = Tile(x, y, TileType.ITEM, item_id, area_type)
-                    elif rand < 0.40:  # 20% chance for enemy
+                    elif rand < 0.40:  # % chance for enemy
                         enemy_id = random.choice(area_data["enemies"])
                         tile = Tile(x, y, TileType.ENEMY, enemy_id, area_type)
                         tile.health = enemy_health[enemy_id]
@@ -581,6 +730,10 @@ class Game:
         self.boss_turn_timer = 0
         self.player_attack_timer = 0
         
+        # Reset tile counter for rainstorm music
+        self.tiles_clicked = 0
+        self.last_clicked_area = None
+        
         # Regenerate the ENTIRE grid with new random layout
         self.initialize_game()
         
@@ -618,6 +771,9 @@ class Game:
             
             # Check if tile can be clicked (adjacent to revealed tiles or first tile)
             if tile.state == TileState.FACE_DOWN and self.can_click_tile(grid_x, grid_y):
+                # Play UI click sound
+                self.sound_manager.play_sound("ui_click")
+                
                 # Check for Maridia movement restriction BEFORE processing tile
                 if tile.area == AreaType.MARIDIA and not self.inventory.get("gravity", False):
                     self.log_combat("Cannot enter Maridia without Gravity Suit!")
@@ -625,6 +781,19 @@ class Game:
                 
                 tile.state = TileState.FACE_UP
                 self.revealed_tiles.append((grid_x, grid_y))
+                self.tiles_clicked += 1
+                
+                # Check if we entered a new area and update music
+                if tile.area != self.last_clicked_area and not self.is_fight_active():
+                    phantoon_defeated = self.boss_defeats.get("phantoon", 0) > 0
+                    # Use rainstorm music for first 4 tiles in Crateria
+                    use_rainstorm = (tile.area == AreaType.CRATERIA and self.tiles_clicked <= 4)
+                    self.sound_manager.play_area_music(tile.area, phantoon_defeated, use_rainstorm)
+                    self.last_clicked_area = tile.area
+                # If staying in Crateria, check if we need to switch from rainstorm to regular music
+                elif tile.area == AreaType.CRATERIA and self.tiles_clicked == 5:
+                    phantoon_defeated = self.boss_defeats.get("phantoon", 0) > 0
+                    self.sound_manager.play_area_music(tile.area, phantoon_defeated, use_rainstorm=False)
                 
                 # Handle item collection
                 if tile.tile_type == TileType.ITEM:
@@ -641,6 +810,9 @@ class Game:
                         # Consumable item
                         self.inventory[tile.item_id] += 1
                         self.log_combat(f"Collected {display_name}! Total: {self.inventory[tile.item_id]}")
+                    
+                    # Play item collection sound
+                    self.sound_manager.play_item_sound(tile.item_id)
                     
                     # Add score for item collection
                     item_scores = {
@@ -665,6 +837,9 @@ class Game:
                 elif tile.tile_type == TileType.BOSS:
                     display_name = self.get_display_name(tile.item_id)
                     self.log_combat(f"Revealed boss: {display_name} (HP: {tile.health})")
+                    # Play boss music if this boss has music
+                    if tile.item_id != "samus_ship":
+                        self.sound_manager.play_boss_music(tile.item_id)
                     
                 elif tile.tile_type == TileType.ENEMY:
                     display_name = self.get_display_name(tile.item_id)
@@ -677,6 +852,8 @@ class Game:
                     if self.player_energy <= 0:
                         self.game_over = True
                         self.log_combat("GAME OVER - Player defeated!")
+                        # Play death music and then stop all music
+                        self.sound_manager.play_death_music()
                 
                     
     def can_click_tile(self, x: int, y: int) -> bool:
@@ -731,6 +908,9 @@ class Game:
                     self.inventory[tile.item_id] += 1
                     self.log_combat(f"X-ray auto-collected {display_name}! Total: {self.inventory[tile.item_id]}")
                 
+                # Play item collection sound
+                self.sound_manager.play_item_sound(tile.item_id)
+                
                 # Add score for item collection
                 item_scores = {
                     "missiles": 10, "supers": 20, "power_bombs": 30, "energy_tank": 50,
@@ -754,6 +934,8 @@ class Game:
                     if self.player_energy <= 0:
                         self.game_over = True
                         self.log_combat("GAME OVER - Player defeated!")
+                        # Play death music and then stop all music
+                        self.sound_manager.play_death_music()
         
     def get_area_color(self, area_type: AreaType) -> Tuple[int, int, int]:
         """Get the color for an area type"""
@@ -858,6 +1040,8 @@ class Game:
                     if self.player_energy <= 0:
                         self.game_over = True
                         self.log_combat("GAME OVER - Player defeated!")
+                        # Play death music and then stop all music
+                        self.sound_manager.play_death_music()
                         return
             
     def process_boss_turns(self):
@@ -886,6 +1070,8 @@ class Game:
                         self.player_energy = 0
                         self.game_over = True
                         self.log_combat("GAME OVER - Player defeated!")
+                        # Play death music and then stop all music
+                        self.sound_manager.play_death_music()
                         
     def process_player_attacks(self):
         """Process player attacks on bosses and enemies"""
@@ -939,6 +1125,8 @@ class Game:
                                 self.game_over = True
                                 self.victory = True
                                 self.log_combat("SAMUS WINS! Mother Brain defeated!")
+                                # Play ending music
+                                self.sound_manager.play_ending_music()
                                 return
                             
                             # Add score for boss defeat
@@ -951,15 +1139,33 @@ class Game:
                             self.score += boss_scores.get(tile.item_id, 1000)
                             display_name = self.get_display_name(tile.item_id)
                             self.log_combat(f"{display_name} defeated! Score: +{boss_scores.get(tile.item_id, 1000)}")
+                            
+                            # Play explosion/death sound for boss
+                            self.sound_manager.play_sound("explosion")
+                            
+                            # Restore area music after boss defeat if no other fights active
+                            if not self.is_fight_active():
+                                phantoon_defeated = self.boss_defeats.get("phantoon", 0) > 0
+                                if self.last_clicked_area:
+                                    self.sound_manager.play_area_music(self.last_clicked_area, phantoon_defeated)
                         
                         # Handle enemy defeats
                         elif tile.tile_type == TileType.ENEMY:
                             enemy_scores = {
-                                "geemer": 25, "skree": 35, "side_hopper": 50, "ciser": 75
+                                "geemer": 25, "skree": 35, "side_hopper": 50, "ciser": 75, "metroid": 150
                             }
                             self.score += enemy_scores.get(tile.item_id, 25)
                             display_name = self.get_display_name(tile.item_id)
                             self.log_combat(f"{display_name} defeated! Score: +{enemy_scores.get(tile.item_id, 25)}")
+                            
+                            # Play enemy death sound
+                            self.sound_manager.play_sound("enemy_death")
+                            
+                            # Restore area music after enemy defeat if no other fights active
+                            if not self.is_fight_active():
+                                phantoon_defeated = self.boss_defeats.get("phantoon", 0) > 0
+                                if self.last_clicked_area:
+                                    self.sound_manager.play_area_music(self.last_clicked_area, phantoon_defeated)
                         
     def get_boss_damage(self, boss_id: str) -> int:
         """Get boss attack damage"""
@@ -1013,6 +1219,15 @@ class Game:
         if boss_id == "draygon" and self.inventory.get("grapple", False):
             base_damage *= 3
             self.log_combat("Grappling beam bonus vs Draygon! 3x damage!")
+        
+        # Special enemy interactions - Metroids
+        if boss_id == "metroid":
+            if self.inventory.get("ice", False):
+                base_damage *= 2  # Double damage with Ice Beam
+                self.log_combat("Ice Beam is super effective against Metroids! 2x damage!")
+            else:
+                base_damage = int(base_damage * 0.5)  # Half damage without Ice Beam
+                self.log_combat("Metroids are resistant! Need Ice Beam for full damage!")
             
         # Suit bonuses
         if self.inventory.get("varia", False):
@@ -1389,7 +1604,7 @@ class SpriteManager:
     def load_enemy_sprites(self, sheet: pygame.Surface, sprite_width: int, sprite_height: int) -> Dict[str, pygame.Surface]:
         """Load enemy sprites from a single row sheet"""
         sprites = {}
-        enemy_names = ["geemer", "skree", "side_hopper", "ciser"]
+        enemy_names = ["geemer", "skree", "side_hopper", "ciser", "metroid"]
         
         for i, name in enumerate(enemy_names):
             x = i * sprite_width
