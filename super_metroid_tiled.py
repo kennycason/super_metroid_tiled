@@ -34,6 +34,8 @@ WHITE = (255, 255, 255)
 GRAY = (128, 128, 128)
 DARK_GRAY = (64, 64, 64)
 DARKER_GRAY = (51, 51, 51)  # #333 for Log panel background
+# Mystery cover color for hidden tiles (dark tan)
+DARK_TAN = (120, 95, 65)
 # Super Metroid themed colors (darker, more authentic)
 CRATERIA_LIGHT_BLUE = (100, 150, 200)  # Light blue for Crateria
 BRINSTAR_GREEN = (0, 120, 0)      # Darker green for Brinstar
@@ -63,6 +65,7 @@ class AreaType(Enum):
 class TileState(Enum):
     """State of a tile"""
     FACE_DOWN = "face_down"
+    PREVIEWED = "previewed"
     FACE_UP = "face_up"
     DESTROYED = "destroyed"
 
@@ -769,91 +772,104 @@ class Game:
             
             tile = self.grid[grid_y][grid_x]
             
-            # Check if tile can be clicked (adjacent to revealed tiles or first tile)
-            if tile.state == TileState.FACE_DOWN and self.can_click_tile(grid_x, grid_y):
-                # Play UI click sound
+            # Only interact with tiles that are still hidden or previewed
+            if tile.state not in (TileState.FACE_DOWN, TileState.PREVIEWED):
+                return
+
+            if not self.can_click_tile(grid_x, grid_y):
+                return
+
+            has_gravity = self.inventory.get("gravity", False)
+
+            # Special handling for Maridia without the Gravity Suit
+            if tile.area == AreaType.MARIDIA and not has_gravity:
                 self.sound_manager.play_sound("ui_click")
-                
-                # Check for Maridia movement restriction BEFORE processing tile
-                if tile.area == AreaType.MARIDIA and not self.inventory.get("gravity", False):
-                    self.log_combat("Cannot enter Maridia without Gravity Suit!")
-                    return  # Exit early, don't process the tile
-                
-                tile.state = TileState.FACE_UP
+                if tile.state != TileState.PREVIEWED:
+                    tile.state = TileState.PREVIEWED
+                    area_name = self.get_area_display_name(tile.area)
+                    self.log_combat(f"{area_name} resists entry without the Gravity Suit!")
+                else:
+                    self.log_combat("Gravity Suit required to enter Maridia!")
+                return
+
+            # Normal reveal flow
+            self.sound_manager.play_sound("ui_click")
+            tile.state = TileState.FACE_UP
+            if (grid_x, grid_y) not in self.revealed_tiles:
                 self.revealed_tiles.append((grid_x, grid_y))
-                self.tiles_clicked += 1
-                
-                # Check if we entered a new area and update music
-                if tile.area != self.last_clicked_area and not self.is_fight_active():
-                    phantoon_defeated = self.boss_defeats.get("phantoon", 0) > 0
-                    # Use rainstorm music for first 4 tiles in Crateria
-                    use_rainstorm = (tile.area == AreaType.CRATERIA and self.tiles_clicked <= 4)
-                    self.sound_manager.play_area_music(tile.area, phantoon_defeated, use_rainstorm)
-                    self.last_clicked_area = tile.area
-                # If staying in Crateria, check if we need to switch from rainstorm to regular music
-                elif tile.area == AreaType.CRATERIA and self.tiles_clicked == 5:
-                    phantoon_defeated = self.boss_defeats.get("phantoon", 0) > 0
-                    self.sound_manager.play_area_music(tile.area, phantoon_defeated, use_rainstorm=False)
-                
-                # Handle item collection
-                if tile.tile_type == TileType.ITEM:
-                    display_name = self.get_display_name(tile.item_id)
-                    # Check if item already collected (for unique items)
-                    if isinstance(self.inventory[tile.item_id], bool):
-                        if self.inventory[tile.item_id]:
-                            self.log_combat(f"Already have {display_name}!")
-                            return
-                        else:
-                            self.inventory[tile.item_id] = True
-                            self.log_combat(f"Collected {display_name}!")
+            self.tiles_clicked += 1
+
+            # Check if we entered a new area and update music
+            if tile.area != self.last_clicked_area and not self.is_fight_active():
+                phantoon_defeated = self.boss_defeats.get("phantoon", 0) > 0
+                # Use rainstorm music for first 4 tiles in Crateria
+                use_rainstorm = (tile.area == AreaType.CRATERIA and self.tiles_clicked <= 4)
+                self.sound_manager.play_area_music(tile.area, phantoon_defeated, use_rainstorm)
+                self.last_clicked_area = tile.area
+            # If staying in Crateria, check if we need to switch from rainstorm to regular music
+            elif tile.area == AreaType.CRATERIA and self.tiles_clicked == 5:
+                phantoon_defeated = self.boss_defeats.get("phantoon", 0) > 0
+                self.sound_manager.play_area_music(tile.area, phantoon_defeated, use_rainstorm=False)
+
+            # Handle item collection
+            if tile.tile_type == TileType.ITEM:
+                display_name = self.get_display_name(tile.item_id)
+                # Check if item already collected (for unique items)
+                if isinstance(self.inventory[tile.item_id], bool):
+                    if self.inventory[tile.item_id]:
+                        self.log_combat(f"Already have {display_name}!")
+                        return
                     else:
-                        # Consumable item
-                        self.inventory[tile.item_id] += 1
-                        self.log_combat(f"Collected {display_name}! Total: {self.inventory[tile.item_id]}")
-                    
-                    # Play item collection sound
-                    self.sound_manager.play_item_sound(tile.item_id)
-                    
-                    # Add score for item collection
-                    item_scores = {
-                        "missiles": 10, "supers": 20, "power_bombs": 30, "energy_tank": 50,
-                        "morph": 100, "bomb": 100, "hijump": 150, "speed": 150,
-                        "grapple": 200, "xray": 200, "spring": 150, "space": 200,
-                        "screw": 250, "charge": 150, "spazer": 200, "wave": 200,
-                        "ice": 200, "plasma": 250, "varia": 300, "gravity": 400
-                    }
-                    self.score += item_scores.get(tile.item_id, 10)
-                    
-                    # Energy tanks increase max energy and heal fully
-                    if tile.item_id == "energy_tank":
-                        self.max_energy += 100  # Permanently increase max energy
-                        self.player_energy = self.max_energy  # Fully heal
-                        self.log_combat(f"Energy tank collected! Max energy: {self.max_energy}")
-                    
-                    # X-ray scope auto-grabs adjacent tiles if they are items
-                    if self.inventory.get("xray", False):
-                        self.auto_grab_adjacent_items(grid_x, grid_y)
-                    
-                elif tile.tile_type == TileType.BOSS:
-                    display_name = self.get_display_name(tile.item_id)
-                    self.log_combat(f"Revealed boss: {display_name} (HP: {tile.health})")
-                    # Play boss music if this boss has music
-                    if tile.item_id != "samus_ship":
-                        self.sound_manager.play_boss_music(tile.item_id)
-                    
-                elif tile.tile_type == TileType.ENEMY:
-                    display_name = self.get_display_name(tile.item_id)
-                    self.log_combat(f"Revealed enemy: {display_name} (HP: {tile.health})")
-                    
-                # Check for Norfair damage (without Varia suit)
-                if tile.area == AreaType.NORFAIR and not self.inventory.get("varia", False):
-                    self.player_energy -= 25
-                    self.log_combat("Norfair heat damage! -25 energy")
-                    if self.player_energy <= 0:
-                        self.game_over = True
-                        self.log_combat("GAME OVER - Player defeated!")
-                        # Play death music and then stop all music
-                        self.sound_manager.play_death_music()
+                        self.inventory[tile.item_id] = True
+                        self.log_combat(f"Collected {display_name}!")
+                else:
+                    # Consumable item
+                    self.inventory[tile.item_id] += 1
+                    self.log_combat(f"Collected {display_name}! Total: {self.inventory[tile.item_id]}")
+
+                # Play item collection sound
+                self.sound_manager.play_item_sound(tile.item_id)
+
+                # Add score for item collection
+                item_scores = {
+                    "missiles": 10, "supers": 20, "power_bombs": 30, "energy_tank": 50,
+                    "morph": 100, "bomb": 100, "hijump": 150, "speed": 150,
+                    "grapple": 200, "xray": 200, "spring": 150, "space": 200,
+                    "screw": 250, "charge": 150, "spazer": 200, "wave": 200,
+                    "ice": 200, "plasma": 250, "varia": 300, "gravity": 400
+                }
+                self.score += item_scores.get(tile.item_id, 10)
+
+                # Energy tanks increase max energy and heal fully
+                if tile.item_id == "energy_tank":
+                    self.max_energy += 100  # Permanently increase max energy
+                    self.player_energy = self.max_energy  # Fully heal
+                    self.log_combat(f"Energy tank collected! Max energy: {self.max_energy}")
+
+                # X-ray scope auto-grabs adjacent tiles if they are items
+                if self.inventory.get("xray", False):
+                    self.auto_grab_adjacent_items(grid_x, grid_y)
+
+            elif tile.tile_type == TileType.BOSS:
+                display_name = self.get_display_name(tile.item_id)
+                self.log_combat(f"Revealed boss: {display_name} (HP: {tile.health})")
+                # Play boss music if this boss has music
+                if tile.item_id != "samus_ship":
+                    self.sound_manager.play_boss_music(tile.item_id)
+
+            elif tile.tile_type == TileType.ENEMY:
+                display_name = self.get_display_name(tile.item_id)
+                self.log_combat(f"Revealed enemy: {display_name} (HP: {tile.health})")
+
+            # Check for Norfair damage (without Varia suit)
+            if tile.area == AreaType.NORFAIR and not self.inventory.get("varia", False):
+                self.player_energy -= 25
+                self.log_combat("Norfair heat damage! -25 energy")
+                if self.player_energy <= 0:
+                    self.game_over = True
+                    self.log_combat("GAME OVER - Player defeated!")
+                    # Play death music and then stop all music
+                    self.sound_manager.play_death_music()
                 
                     
     def can_click_tile(self, x: int, y: int) -> bool:
@@ -869,6 +885,25 @@ class Game:
                 
         return False
     
+    def has_revealed_neighbor(self, x: int, y: int) -> bool:
+        """Check if a tile has a horizontally or vertically adjacent revealed tile"""
+        neighbors = [
+            (x, y - 1),  # Up
+            (x, y + 1),  # Down
+            (x - 1, y),  # Left
+            (x + 1, y)   # Right
+        ]
+
+        for nx, ny in neighbors:
+            if not (0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE):
+                continue
+
+            neighbor_tile = self.grid[ny][nx]
+            if neighbor_tile.state in (TileState.FACE_UP, TileState.DESTROYED, TileState.PREVIEWED):
+                return True
+
+        return False
+
     def auto_grab_adjacent_items(self, x: int, y: int):
         """Auto-grab diagonal tiles if they are items (X-ray scope ability - forms an X!)"""
         # Check diagonal directions only (forms an "X" pattern)
@@ -888,13 +923,19 @@ class Game:
             
             tile = self.grid[diag_y][diag_x]
             
-            # Only auto-grab if it's face-down and is an item
-            if tile.state == TileState.FACE_DOWN and tile.tile_type == TileType.ITEM:
-                # Check for Maridia movement restriction
-                if tile.area == AreaType.MARIDIA and not self.inventory.get("gravity", False):
-                    continue  # Skip Maridia tiles without gravity suit
-                
-                tile.state = TileState.FACE_UP
+            if tile.tile_type != TileType.ITEM:
+                continue
+
+            # Only auto-grab if it's still hidden (face-down or previewed)
+            if tile.state not in (TileState.FACE_DOWN, TileState.PREVIEWED):
+                continue
+
+            # Check for Maridia movement restriction
+            if tile.area == AreaType.MARIDIA and not self.inventory.get("gravity", False):
+                continue  # Skip Maridia tiles without gravity suit
+            
+            tile.state = TileState.FACE_UP
+            if (diag_x, diag_y) not in self.revealed_tiles:
                 self.revealed_tiles.append((diag_x, diag_y))
                 
                 # Collect the item
@@ -950,6 +991,19 @@ class Game:
         }
         return area_colors.get(area_type, DARK_GRAY)
         
+    def get_area_display_name(self, area_type: AreaType) -> str:
+        """Get a human-friendly name for an area"""
+        area_names = {
+            AreaType.CRATERIA: "Crateria",
+            AreaType.BRINSTAR: "Brinstar",
+            AreaType.NORFAIR: "Norfair",
+            AreaType.MARIDIA: "Maridia",
+            AreaType.TOURIAN: "Tourian",
+            AreaType.WRECKED_SHIP: "Wrecked Ship",
+            AreaType.CERES: "Ceres"
+        }
+        return area_names.get(area_type, area_type.value.replace("_", " ").title())
+
     def get_display_name(self, entity_id: str) -> str:
         """Get a nice display name for enemies and bosses (wrapper for standalone function)"""
         return get_display_name(entity_id)
@@ -993,27 +1047,29 @@ class Game:
         
         # Update combat - determine attack order based on items
         self.boss_turn_timer += 1
-        player_attacks_first = random.random() < self.get_attack_first_chance()
+        self.player_attack_timer += 1
         
+        # Boss/Enemy attack cycle (every 60 frames = 1 second)
         if self.boss_turn_timer >= self.boss_turn_interval:
             self.boss_turn_timer = 0
+            player_attacks_first = random.random() < self.get_attack_first_chance()
             
             if player_attacks_first and self.is_fight_active():
                 # Player attacks first
                 self.process_player_attacks()
+                self.player_attack_timer = 0  # Reset player timer since we just attacked
                 self.process_enemy_turns()  # Then enemies
                 self.process_boss_turns()    # Then bosses
             else:
-                # Normal order: enemies first, then bosses
+                # Normal order: enemies/bosses first, then player
                 self.process_enemy_turns()
                 self.process_boss_turns()
-            
-        # Update player attacks on bosses (slower) - only if didn't attack first
-        if not player_attacks_first:
-            self.player_attack_timer += 1
-            if self.player_attack_timer >= self.player_attack_interval:
-                self.player_attack_timer = 0
-                self.process_player_attacks()
+        
+        # Player attacks more frequently (every 30 frames = 0.5 seconds)
+        # Only attack if we didn't just attack via the boss turn
+        if self.player_attack_timer >= self.player_attack_interval:
+            self.player_attack_timer = 0
+            self.process_player_attacks()
             
     def process_enemy_turns(self):
         """Process enemy attacks on player"""
@@ -1266,11 +1322,21 @@ class Game:
                 screen_x, screen_y = tile.get_screen_position()
                 
                 if tile.state == TileState.FACE_DOWN:
-                    # Draw face-down tile with area color
+                    if self.has_revealed_neighbor(x, y):
+                        area_color = self.get_area_color(tile.area)
+                        pygame.draw.rect(self.screen, area_color,
+                                         (screen_x, screen_y, TILE_SIZE, TILE_SIZE))
+                    else:
+                        pygame.draw.rect(self.screen, DARK_TAN,
+                                         (screen_x, screen_y, TILE_SIZE, TILE_SIZE))
+                    pygame.draw.rect(self.screen, GRAY,
+                                   (screen_x, screen_y, TILE_SIZE, TILE_SIZE), 2)
+                elif tile.state == TileState.PREVIEWED:
+                    # Show the area's color but keep contents hidden
                     area_color = self.get_area_color(tile.area)
-                    pygame.draw.rect(self.screen, area_color, 
+                    pygame.draw.rect(self.screen, area_color,
                                    (screen_x, screen_y, TILE_SIZE, TILE_SIZE))
-                    pygame.draw.rect(self.screen, GRAY, 
+                    pygame.draw.rect(self.screen, GRAY,
                                    (screen_x, screen_y, TILE_SIZE, TILE_SIZE), 2)
                 elif tile.state == TileState.FACE_UP:
                     # Draw face-up tile with sprite - all tiles have black background
